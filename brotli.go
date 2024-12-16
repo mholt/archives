@@ -28,14 +28,16 @@ func (br Brotli) Match(_ context.Context, filename string, stream io.Reader) (Ma
 		mr.ByName = true
 	}
 
-	// brotli does not have well-defined file headers or a magic number;
-	// the best way to match the stream is probably to try decoding part
-	// of it, but we'll just have to guess a large-enough size that is
-	// still small enough for the smallest streams we'll encounter
-	r := brotli.NewReader(stream)
-	buf := make([]byte, 16)
-	if _, err := io.ReadFull(r, buf); err == nil {
-		mr.ByStream = true
+	if stream != nil {
+		// brotli does not have well-defined file headers or a magic number;
+		// the best way to match the stream is probably to try decoding part
+		// of it, but we'll just have to guess a large-enough size that is
+		// still small enough for the smallest streams we'll encounter
+		r := brotli.NewReader(stream)
+		buf := make([]byte, 16)
+		if _, err := io.ReadFull(r, buf); err == nil {
+			mr.ByStream = true
+		}
 	}
 
 	return mr, nil

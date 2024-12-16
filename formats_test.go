@@ -455,5 +455,12 @@ func TestIdentifyASCIIFileStartingWithX(t *testing.T) {
 	if !errors.Is(err, NoMatch) {
 		t.Errorf("Identify failed: %v", err)
 	}
+}
 
+func TestIdentifyStreamNil(t *testing.T) {
+	format, _, err := Identify(context.Background(), "test.tar.zst", nil)
+	checkErr(t, err, "identifying tar.zst")
+	if format.Extension() != ".tar.zst" {
+		t.Errorf("unexpected format found: expected=.tar.zst actual=%s", format.Extension())
+	}
 }
