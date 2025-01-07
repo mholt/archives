@@ -16,6 +16,9 @@ func init() {
 }
 
 type Tar struct {
+	// If true, use GNU header format
+	FormatGNU bool
+
 	// If true, preserve only numeric user and group id
 	NumericUIDGID bool
 
@@ -86,6 +89,9 @@ func (t Tar) writeFileToArchive(ctx context.Context, tw *tar.Writer, file FileIn
 	hdr.Name = file.NameInArchive // complete path, since FileInfoHeader() only has base name
 	if hdr.Name == "" {
 		hdr.Name = file.Name() // assume base name of file I guess
+	}
+	if t.FormatGNU {
+		hdr.Format = tar.FormatGNU
 	}
 	if t.NumericUIDGID {
 		hdr.Uname = ""
