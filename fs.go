@@ -467,7 +467,10 @@ func (f ArchiveFS) Open(name string) (fs.File, error) {
 			return err
 		}
 
-		fsFile = closeBoth{File: innerFile, c: archiveFile}
+		fsFile = innerFile
+		if archiveFile != nil {
+			fsFile = closeBoth{File: innerFile, c: archiveFile}
+		}
 
 		if decompressor != nil {
 			fsFile = closeBoth{fsFile, decompressor}
