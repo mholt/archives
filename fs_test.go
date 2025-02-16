@@ -2,6 +2,7 @@ package archives
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
@@ -291,4 +292,71 @@ func TestArchiveFS_ReadDir(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFileSystem(t *testing.T) {
+	ctx := context.Background()
+	filename := "testdata/test.zip"
+
+	checkFS := func(t *testing.T, fsys fs.FS) {
+		license, err := fsys.Open("LICENSE")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := io.ReadAll(license)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(b) == 0 {
+			t.Fatal("empty file")
+		}
+		err = license.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("filename", func(t *testing.T) {
+		fsys, err := FileSystem(ctx, filename, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkFS(t, fsys)
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		f, err := os.Open(filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			err = f.Close()
+			if err != nil {
+				t.Error(err)
+			}
+		})
+		fsys, err := FileSystem(ctx, "", f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkFS(t, fsys)
+	})
+
+	t.Run("filename and stream", func(t *testing.T) {
+		f, err := os.Open(filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			err = f.Close()
+			if err != nil {
+				t.Error(err)
+			}
+		})
+		fsys, err := FileSystem(ctx, "test.zip", f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkFS(t, fsys)
+	})
 }
