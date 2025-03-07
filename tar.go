@@ -16,6 +16,9 @@ func init() {
 }
 
 type Tar struct {
+	// If true, set ownership of root user and group
+	Fakeroot bool
+
 	// If true, use GNU header format
 	FormatGNU bool
 
@@ -86,7 +89,9 @@ func (t Tar) writeFileToArchive(ctx context.Context, tw *tar.Writer, file FileIn
 	if err != nil {
 		return fmt.Errorf("file %s: creating header: %w", file.NameInArchive, err)
 	}
+
 	hdr.Name = file.NameInArchive // complete path, since FileInfoHeader() only has base name
+
 	if hdr.Name == "" {
 		hdr.Name = file.Name() // assume base name of file I guess
 	}
@@ -96,6 +101,12 @@ func (t Tar) writeFileToArchive(ctx context.Context, tw *tar.Writer, file FileIn
 	if t.NumericUIDGID {
 		hdr.Uname = ""
 		hdr.Gname = ""
+	}
+	if t.Fakeroot {
+		hdr.Uid = 0
+		hdr.Gid = 0
+		hdr.Uname = "root"
+		hdr.Gname = "root"
 	}
 
 	if err := tw.WriteHeader(hdr); err != nil {
