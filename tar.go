@@ -26,6 +26,18 @@ type Tar struct {
 	// a file within an archive will be logged and the
 	// operation will continue on remaining files.
 	ContinueOnError bool
+
+	// User ID of the file owner
+	Uid int
+
+	// Group ID of the file owner
+	Gid int
+
+	// Username of the file owner
+	Uname string
+
+	// Group name of the file owner
+	Gname string
 }
 
 func (Tar) Extension() string { return ".tar" }
@@ -96,6 +108,18 @@ func (t Tar) writeFileToArchive(ctx context.Context, tw *tar.Writer, file FileIn
 	if t.NumericUIDGID {
 		hdr.Uname = ""
 		hdr.Gname = ""
+	}
+	if t.Uid != 0 {
+		hdr.Uid = t.Uid
+	}
+	if t.Gid != 0 {
+		hdr.Gid = t.Gid
+	}
+	if t.Uname != "" {
+		hdr.Uname = t.Uname
+	}
+	if t.Gname != "" {
+		hdr.Gname = t.Gname
 	}
 
 	if err := tw.WriteHeader(hdr); err != nil {
