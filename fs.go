@@ -741,6 +741,12 @@ type DeepFS struct {
 	// The root filepath on disk.
 	Root string
 
+	// Set a custom separator for when traversing into an archive.
+	// made private because it's mostly useful in the
+	// DeepWalkWithInnerSeparator function and could cause weird behavior
+	// if used outside of it when mixing other fs calls with WalkDir.
+	innerFSSeparator string
+
 	// An optional context, mainly for cancellation.
 	Context context.Context
 
@@ -800,7 +806,7 @@ func (fsys *DeepFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	// make sure entries that appear to be archive files indicate they are a directory
 	// so the fs package will try to walk them
 	for i, entry := range entries {
-		if slices.Contains(archiveExtensions, strings.ToLower(path.Ext(entry.Name()))) {
+		if PathIsArchive(entry.Name()) {
 			entries[i] = alwaysDirEntry{entry}
 		}
 	}
@@ -840,10 +846,31 @@ func (fsys *DeepFS) getInnerFsys(realPath string) fs.FS {
 // If no archive extension is found in the path, only the realPath is returned.
 // If the input path is precisely an archive file (i.e. ends with an archive file
 // extension), then innerPath is returned as "." which indicates the root of the archive.
-func (*DeepFS) splitPath(path string) (realPath, innerPath string) {
+func (fsys *DeepFS) splitPath(path string) (realPath, innerPath string) {
 	if len(path) < 2 {
 		realPath = path
 		return
+	}
+
+	// A custom separator should be quick to spot, but it's important
+	// that a custom separator not be found anywhere else in the path
+	if len(fsys.innerFSSeparator) > 0 && fsys.innerFSSeparator != string(filepath.Separator) {
+		end := strings.Index(path, fsys.innerFSSeparator)
+		if end > -1 {
+			realPath = path[:end]
+			innerPath = path[end+len(fsys.innerFSSeparator):]
+			if len(innerPath) == 0 {
+				innerPath = "."
+			}
+			return
+		} else if PathIsArchive(path) {
+			realPath = path
+			innerPath = "."
+			return
+		} else {
+			realPath = path
+			return
+		}
 	}
 
 	// slightly more LoC, but more efficient, than exploding the path on every slash,
@@ -859,21 +886,18 @@ func (*DeepFS) splitPath(path string) (realPath, innerPath string) {
 
 	for {
 		part := strings.TrimRight(strings.ToLower(path[start:end]), " ")
-
-		for _, ext := range archiveExtensions {
-			if strings.HasSuffix(part, ext) {
-				// we've found an archive extension, so the path until the end of this segment is
-				// the "real" OS path, and what remains (if anything( is the path within the archive
-				realPath = filepath.Clean(filepath.FromSlash(path[:end]))
-				if end < len(path) {
-					innerPath = path[end+1:]
-				} else {
-					// signal to the caller that this is an archive,
-					// even though it is the very root of the archive
-					innerPath = "."
-				}
-				return
+		if PathIsArchive(part) {
+			// we've found an archive extension, so the path until the end of this segment is
+			// the "real" OS path, and what remains (if anything( is the path within the archive
+			realPath = filepath.Clean(filepath.FromSlash(path[:end]))
+			if end+1 < len(path) {
+				innerPath = path[end+1:]
+			} else {
+				// signal to the caller that this is an archive,
+				// even though it is the very root of the archive
+				innerPath = "."
 			}
+			return
 		}
 
 		// advance to the next segment, or end of string
@@ -897,6 +921,70 @@ func (fsys *DeepFS) context() context.Context {
 		return fsys.Context
 	}
 	return context.Background()
+}
+
+// deepWalkDir recursively descends a, calling walkDirFn.
+func deepWalkDir(fsys *DeepFS, name string, d fs.DirEntry, walkDirFn fs.WalkDirFunc) error {
+	if err := walkDirFn(name, d, nil); err != nil || !d.IsDir() {
+		if err == fs.SkipDir && d.IsDir() {
+			// Successfully skipped directory.
+			err = nil
+		}
+		return err
+	}
+
+	dirs, err := fs.ReadDir(fsys, name)
+	if err != nil {
+		// Second call, to report ReadDir error.
+		err = walkDirFn(name, d, err)
+		if err != nil {
+			if err == fs.SkipDir && d.IsDir() {
+				err = nil
+			}
+			return err
+		}
+	}
+
+	for _, d1 := range dirs {
+		var name1 string
+		if len(fsys.innerFSSeparator) > 0 && name == fsys.Root {
+			name1 = name + fsys.innerFSSeparator + d1.Name()
+		} else {
+			name1 = filepath.Join(name, d1.Name())
+		}
+
+		if err := deepWalkDir(fsys, name1, d1, walkDirFn); err != nil {
+			if err == fs.SkipDir {
+				break
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// DeepWalkWithInnerSeparator walks the file tree rooted at root, calling fn
+// for each file or directory in the tree, including root.
+//
+// This behaves like filepath.WalkDir except it provides a custom separator
+// at the boundry between file systems.
+//
+// For example: if sep == ":" then path == "outer/fs.tar.gz:inner/fs"
+//
+// This can be useful for programs in the WalkDirFunc to tell when they've
+// crossed from one file system to the next.
+func DeepWalkWithInnerSeparator(root, innerFSSeparator string, fn fs.WalkDirFunc) error {
+	fsys := &DeepFS{Root: root, innerFSSeparator: innerFSSeparator}
+	info, err := fs.Stat(fsys, root)
+	if err != nil {
+		err = fn(root, nil, err)
+	} else {
+		err = deepWalkDir(fsys, root, fs.FileInfoToDirEntry(info), fn)
+	}
+	if err == fs.SkipDir || err == fs.SkipAll {
+		return nil
+	}
+	return err
 }
 
 // alwaysDirEntry always returns true for IsDir(). Because
@@ -924,6 +1012,22 @@ var archiveExtensions = []string{
 	".tar.sz",
 	".tar.s2",
 	".tar.lz",
+}
+
+// PathIsArchive returns true if the path ends with an archive file (i.e.
+// whether the path traverse to an archive) solely by lexical analysis (no
+// reading the files or headers is performed).
+func PathIsArchive(path string) bool {
+	// normalize the extension
+	path = strings.ToLower(path)
+	for _, ext := range archiveExtensions {
+		// Check the full ext
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // PathContainsArchive returns true if the path contains an archive file (i.e.
