@@ -741,8 +741,11 @@ type DeepFS struct {
 	// The root filepath on disk.
 	Root string
 
-	// Set a custom separator for when traversing into an archive.
-	InnerFSSeparator string
+	// Set a custom separator for marking when traversing into an archive.
+	// If empty, the default system separator is used.
+	// If set, use DeepFS.WalkDir instead of fs.WalkDir to handle the custom
+	// separator properly
+	InnerFsysSeparator string
 
 	// An optional context, mainly for cancellation.
 	Context context.Context
@@ -833,7 +836,8 @@ func (fsys *DeepFS) getInnerFsys(realPath string) fs.FS {
 }
 
 // splitPath splits a file path into the "real" path and the "inner" path components,
-// where the split point is the first extension of an archive filetype like ".zip" or
+// where the split point is the first occurrence of the InnerFsysSeparator, or if that's
+// empty or not found, the first extension of an archive filetype like ".zip" or
 // ".tar.gz" that occurs in the path.
 //
 // The real path is the path that can be accessed on disk and will be returned with
@@ -851,14 +855,18 @@ func (fsys *DeepFS) splitPath(path string) (realPath, innerPath string) {
 
 	// A custom separator should be quick to spot, but it's important
 	// that a custom separator not be found anywhere else in the path
-	if len(fsys.InnerFSSeparator) > 0 && fsys.InnerFSSeparator != string(filepath.Separator) {
-		end := strings.Index(path, fsys.InnerFSSeparator)
+	if len(fsys.InnerFsysSeparator) > 0 && fsys.InnerFsysSeparator != string(filepath.Separator) {
+		end := strings.Index(path, fsys.InnerFsysSeparator)
 		if end > -1 {
 			realPath = path[:end]
-			innerPath = path[end+len(fsys.InnerFSSeparator):]
+			innerPath = path[end+len(fsys.InnerFsysSeparator):]
 			if len(innerPath) == 0 {
 				innerPath = "."
 			}
+			return
+		} else if PathIsArchive(path) {
+			realPath = path
+			innerPath = "."
 			return
 		} else {
 			realPath = path
@@ -883,7 +891,7 @@ func (fsys *DeepFS) splitPath(path string) (realPath, innerPath string) {
 			// we've found an archive extension, so the path until the end of this segment is
 			// the "real" OS path, and what remains (if anything( is the path within the archive
 			realPath = filepath.Clean(filepath.FromSlash(path[:end]))
-			if end + 1 < len(path) {
+			if end+1 < len(path) {
 				innerPath = path[end+1:]
 			} else {
 				// signal to the caller that this is an archive,
@@ -914,6 +922,74 @@ func (fsys *DeepFS) context() context.Context {
 		return fsys.Context
 	}
 	return context.Background()
+}
+
+// WalkDir walks the file tree rooted at fsys.Root, calling walkDirFn
+// for each file or directory in the tree, including root. If set, it uses
+// fsys.InnerFsysSeparator when constructing paths that enter archives.
+func (fsys *DeepFS) WalkDir(walkDirFn fs.WalkDirFunc) error {
+	info, err := fs.Stat(fsys, ".")
+	if err != nil {
+		err = walkDirFn(".", nil, err)
+	} else {
+		err = fsys.walkDir(fsys.Root, fs.FileInfoToDirEntry(info), walkDirFn)
+	}
+	if err == fs.SkipDir || err == fs.SkipAll {
+		return nil
+	}
+	return err
+}
+
+// walkDir recursively descends path, calling walkDirFn.
+func (fsys *DeepFS) walkDir(name string, d fs.DirEntry, walkDirFn fs.WalkDirFunc) error {
+	// Use the relative path for the callback
+	relName, err := filepath.Rel(fsys.Root, name)
+	if err != nil {
+		// Fallback to using the full name if Rel fails
+		relName = name
+	}
+
+	// Call the provided function
+	if err := walkDirFn(relName, d, nil); err != nil || !d.IsDir() {
+		if err == fs.SkipDir && d.IsDir() {
+			// Successfully skipped directory.
+			err = nil
+		}
+		return err
+	}
+
+	// Read directory entries
+	dirs, err := fs.ReadDir(fsys, relName)
+	if err != nil {
+		// Second call, to report ReadDir error.
+		err = walkDirFn(relName, d, err)
+		if err != nil {
+			if err == fs.SkipDir && d.IsDir() {
+				err = nil
+			}
+			return err
+		}
+	}
+
+	// Recursively walk subdirectories
+	useInnerSep := fsys.InnerFsysSeparator != "" && PathIsArchive(name)
+	for _, d1 := range dirs {
+		name1 := ""
+
+		if useInnerSep {
+			name1 = name + fsys.InnerFsysSeparator + d1.Name()
+		} else {
+			name1 = filepath.Join(name, d1.Name())
+		}
+
+		if err := fsys.walkDir(name1, d1, walkDirFn); err != nil {
+			if err == fs.SkipDir {
+				break
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // alwaysDirEntry always returns true for IsDir(). Because
@@ -950,6 +1026,7 @@ func PathIsArchive(path string) bool {
 	// normalize the extension
 	path = strings.ToLower(path)
 	for _, ext := range archiveExtensions {
+		// Check the full ext
 		if strings.HasSuffix(path, ext) {
 			return true
 		}
@@ -1158,4 +1235,8 @@ var (
 	_ fs.ReadDirFS = (*ArchiveFS)(nil)
 	_ fs.StatFS    = (*ArchiveFS)(nil)
 	_ fs.SubFS     = (*ArchiveFS)(nil)
+
+	_ fs.FS        = (*DeepFS)(nil)
+	_ fs.ReadDirFS = (*DeepFS)(nil)
+	_ fs.StatFS    = (*DeepFS)(nil)
 )
