@@ -741,6 +741,9 @@ type DeepFS struct {
 	// The root filepath on disk.
 	Root string
 
+	// Set a custom separator for when traversing into an archive.
+	InnerFSSeparator string
+
 	// An optional context, mainly for cancellation.
 	Context context.Context
 
@@ -840,9 +843,25 @@ func (fsys *DeepFS) getInnerFsys(realPath string) fs.FS {
 // If no archive extension is found in the path, only the realPath is returned.
 // If the input path is precisely an archive file (i.e. ends with an archive file
 // extension), then innerPath is returned as "." which indicates the root of the archive.
-func (*DeepFS) splitPath(path string) (realPath, innerPath string) {
+func (fsys *DeepFS) splitPath(path string) (realPath, innerPath string) {
 	if len(path) < 2 {
 		realPath = path
+		return
+	}
+
+	// A custom separator should be quick to spot, but it's important
+	// that a custom separator not be found anywhere else in the path
+	if len(fsys.InnerFSSeparator) > 0 && fsys.InnerFSSeparator != string(filepath.Separator) {
+		end := strings.Index(path, fsys.InnerFSSeparator)
+		if end > -1 {
+			realPath = path[:end]
+			innerPath = path[end+len(fsys.InnerFSSeparator):]
+			if len(innerPath) == 0 {
+				innerPath = "."
+			}
+		} else {
+			realPath = path
+		}
 		return
 	}
 
@@ -865,7 +884,7 @@ func (*DeepFS) splitPath(path string) (realPath, innerPath string) {
 				// we've found an archive extension, so the path until the end of this segment is
 				// the "real" OS path, and what remains (if anything( is the path within the archive
 				realPath = filepath.Clean(filepath.FromSlash(path[:end]))
-				if end < len(path) {
+				if end + 1 < len(path) {
 					innerPath = path[end+1:]
 				} else {
 					// signal to the caller that this is an archive,
