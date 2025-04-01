@@ -414,3 +414,50 @@ func TestFileSystem(t *testing.T) {
 		checkFS(t, fsys)
 	})
 }
+
+func TestInnerFsysSeparator(t *testing.T) {
+	t.Run("WalkDir", func(t *testing.T) {
+		for _, separator := range []string{
+			"", "!", "::", ":", "@", string(filepath.Separator),
+		} {
+			fsys := DeepFS{Root: "testdata", InnerFsysSeparator: separator}
+
+			// Build actual paths
+			actual := []string{}
+			fsys.WalkDir(func(name string, d fs.DirEntry, err error) error {
+				actual = append(actual, name)
+				return nil
+			})
+			sort.Strings(actual)
+
+			join := func(a, b string) string {
+				if len(separator) > 0 {
+					return a + separator + b
+				}
+
+				return filepath.Join(a, b)
+			}
+
+			// Build expected paths
+			expected := []string{
+				".",
+				"self-tar.tar",
+				join("self-tar.tar", "._."),
+				join("self-tar.tar", "._test.txt"),
+				join("self-tar.tar", "test.txt"),
+				"test.zip",
+				join("test.zip", "LICENSE"),
+				"unordered.zip",
+				join("unordered.zip", "1"),
+				join("unordered.zip", "1/1"),
+				join("unordered.zip", "1/2"),
+				join("unordered.zip", "2"),
+				join("unordered.zip", "2/1"),
+			}
+
+			if !reflect.DeepEqual(expected, actual) {
+				t.Errorf("For separator '%s' : WalkDir() got: %v, want: %v", separator, actual, expected)
+			}
+		}
+	})
+}
