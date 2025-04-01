@@ -47,7 +47,7 @@ func TestPathWithoutTopDir(t *testing.T) {
 func TestSplitPath(t *testing.T) {
 	d := DeepFS{}
 	for i, testCase := range []struct {
-		input, expectedReal, expectedInner string
+		input, expectedReal, expectedInner, InnerFsysSeparator string
 	}{
 		{
 			input:         "/",
@@ -66,6 +66,11 @@ func TestSplitPath(t *testing.T) {
 		},
 		{
 			input:         "foo.zip",
+			expectedReal:  filepath.Join("foo.zip"),
+			expectedInner: ".",
+		},
+		{
+			input:         "foo.zip/",
 			expectedReal:  filepath.Join("foo.zip"),
 			expectedInner: ".",
 		},
@@ -94,7 +99,56 @@ func TestSplitPath(t *testing.T) {
 			expectedReal:  filepath.Join("a", "foo.zip"),
 			expectedInner: "b/test.tar/c",
 		},
+		{
+			input:              "x/foo.zip:y/test.tar/z",
+			expectedReal:       filepath.Join("x", "foo.zip"),
+			expectedInner:      "y/test.tar/z",
+			InnerFsysSeparator: ":",
+		},
+		{
+			input:              "foo.zip:",
+			expectedReal:       filepath.Join("foo.zip"),
+			expectedInner:      ".",
+			InnerFsysSeparator: ":",
+		},
+		{
+			input:              "l/foo.zip!m/test.tar/n",
+			expectedReal:       filepath.Join("l", "foo.zip"),
+			expectedInner:      "m/test.tar/n",
+			InnerFsysSeparator: "!",
+		},
+		{
+			input:              "foo.zip!",
+			expectedReal:       filepath.Join("foo.zip"),
+			expectedInner:      ".",
+			InnerFsysSeparator: "!",
+		},
+		{ // Confirm paths ending in an archive still work with custom separators
+			input:              "foo.zip",
+			expectedReal:       filepath.Join("foo.zip"),
+			expectedInner:      ".",
+			InnerFsysSeparator: ":",
+		},
+		{ // See what happens if a different separator is defined on a normal path
+			input:              "q/foo.zip/r/test.tar/s",
+			expectedReal:       filepath.Join("q", "foo.zip", "r", "test.tar", "s"),
+			expectedInner:      "",
+			InnerFsysSeparator: "!",
+		},
+		{ // Confirm it works with multi char separators
+			input:              "a/foo.zip::b/test.tar/c",
+			expectedReal:       filepath.Join("a", "foo.zip"),
+			expectedInner:      "b/test.tar/c",
+			InnerFsysSeparator: "::",
+		},
+		{ // A custom separator allows traversing archives without an archive extension
+			input:              "a/foo:b/test.tar/c",
+			expectedReal:       filepath.Join("a", "foo"),
+			expectedInner:      "b/test.tar/c",
+			InnerFsysSeparator: ":",
+		},
 	} {
+		d.InnerFsysSeparator = testCase.InnerFsysSeparator
 		actualReal, actualInner := d.splitPath(testCase.input)
 		if actualReal != testCase.expectedReal {
 			t.Errorf("Test %d (input=%q): expected real path %q but got %q", i, testCase.input, testCase.expectedReal, actualReal)
@@ -358,5 +412,52 @@ func TestFileSystem(t *testing.T) {
 			t.Fatal(err)
 		}
 		checkFS(t, fsys)
+	})
+}
+
+func TestInnerFsysSeparator(t *testing.T) {
+	t.Run("WalkDir", func(t *testing.T) {
+		for _, separator := range []string{
+			"", "!", "::", ":", "@", string(filepath.Separator),
+		} {
+			fsys := DeepFS{Root: "testdata", InnerFsysSeparator: separator}
+
+			// Build actual paths
+			actual := []string{}
+			fsys.WalkDir(func(name string, d fs.DirEntry, err error) error {
+				actual = append(actual, name)
+				return nil
+			})
+			sort.Strings(actual)
+
+			join := func(a, b string) string {
+				if len(separator) > 0 {
+					return a + separator + b
+				}
+
+				return filepath.Join(a, b)
+			}
+
+			// Build expected paths
+			expected := []string{
+				".",
+				"self-tar.tar",
+				join("self-tar.tar", "._."),
+				join("self-tar.tar", "._test.txt"),
+				join("self-tar.tar", "test.txt"),
+				"test.zip",
+				join("test.zip", "LICENSE"),
+				"unordered.zip",
+				join("unordered.zip", "1"),
+				join("unordered.zip", "1/1"),
+				join("unordered.zip", "1/2"),
+				join("unordered.zip", "2"),
+				join("unordered.zip", "2/1"),
+			}
+
+			if !reflect.DeepEqual(expected, actual) {
+				t.Errorf("For separator '%s' : WalkDir() got: %v, want: %v", separator, actual, expected)
+			}
+		}
 	})
 }
