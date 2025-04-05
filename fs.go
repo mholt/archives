@@ -765,7 +765,7 @@ func (fsys *DeepFS) Open(name string) (fs.File, error) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fmt.Errorf("%w: %s", fs.ErrInvalid, name)}
 	}
 	name = path.Join(filepath.ToSlash(fsys.Root), name)
-	realPath, innerPath := fsys.splitPath(name)
+	realPath, innerPath := fsys.SplitPath(name)
 	if innerPath != "" {
 		if innerFsys := fsys.getInnerFsys(realPath); innerFsys != nil {
 			return innerFsys.Open(innerPath)
@@ -779,7 +779,7 @@ func (fsys *DeepFS) Stat(name string) (fs.FileInfo, error) {
 		return nil, &fs.PathError{Op: "stat", Path: name, Err: fmt.Errorf("%w: %s", fs.ErrInvalid, name)}
 	}
 	name = path.Join(filepath.ToSlash(fsys.Root), name)
-	realPath, innerPath := fsys.splitPath(name)
+	realPath, innerPath := fsys.SplitPath(name)
 	if innerPath != "" {
 		if innerFsys := fsys.getInnerFsys(realPath); innerFsys != nil {
 			return fs.Stat(innerFsys, innerPath)
@@ -798,7 +798,7 @@ func (fsys *DeepFS) ReadDir(name string) ([]fs.DirEntry, error) {
 		return nil, &fs.PathError{Op: "readdir", Path: name, Err: fmt.Errorf("%w: %s", fs.ErrInvalid, name)}
 	}
 	name = path.Join(filepath.ToSlash(fsys.Root), name)
-	realPath, innerPath := fsys.splitPath(name)
+	realPath, innerPath := fsys.SplitPath(name)
 	if innerPath != "" {
 		if innerFsys := fsys.getInnerFsys(realPath); innerFsys != nil {
 			return fs.ReadDir(innerFsys, innerPath)
@@ -840,7 +840,7 @@ func (fsys *DeepFS) getInnerFsys(realPath string) fs.FS {
 	return nil
 }
 
-// splitPath splits a file path into the "real" path and the "inner" path components,
+// SplitPath splits a file path into the "real" path and the "inner" path components,
 // where the split point is the first extension of an archive filetype like ".zip" or
 // ".tar.gz" that occurs in the path.
 //
@@ -851,7 +851,7 @@ func (fsys *DeepFS) getInnerFsys(realPath string) fs.FS {
 // If no archive extension is found in the path, only the realPath is returned.
 // If the input path is precisely an archive file (i.e. ends with an archive file
 // extension), then innerPath is returned as "." which indicates the root of the archive.
-func (*DeepFS) splitPath(path string) (realPath, innerPath string) {
+func (*DeepFS) SplitPath(path string) (realPath, innerPath string) {
 	if len(path) < 2 {
 		realPath = path
 		return

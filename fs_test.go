@@ -95,7 +95,7 @@ func TestSplitPath(t *testing.T) {
 			expectedInner: "b/test.tar/c",
 		},
 	} {
-		actualReal, actualInner := d.splitPath(testCase.input)
+		actualReal, actualInner := d.SplitPath(testCase.input)
 		if actualReal != testCase.expectedReal {
 			t.Errorf("Test %d (input=%q): expected real path %q but got %q", i, testCase.input, testCase.expectedReal, actualReal)
 		}
