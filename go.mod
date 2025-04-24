@@ -5,7 +5,7 @@ go 1.22.2
 toolchain go1.23.2
 
 require (
-	github.com/andybalholm/brotli v1.1.1
+	github.com/andybalholm/brotli v1.1.2-0.20250424173009-453214e765f3
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707
 	github.com/klauspost/compress v1.17.11
 	github.com/klauspost/pgzip v1.2.6
