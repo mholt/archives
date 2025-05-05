@@ -20,6 +20,12 @@ func init() {
 	RegisterFormat(Rar{})
 }
 
+type rarReader interface {
+	Next() (*rardecode.FileHeader, error)
+	io.Reader
+	io.WriterTo
+}
+
 type Rar struct {
 	// If true, errors encountered during reading or writing
 	// a file within an archive will be logged and the
@@ -28,6 +34,12 @@ type Rar struct {
 
 	// Password to open archives.
 	Password string
+
+	// Name for a multi-volume archive
+	Name string
+
+	// FS is an fs.FS exposing the files of the archive.
+	FS fs.FS
 }
 
 func (Rar) Extension() string { return ".rar" }
@@ -65,7 +77,26 @@ func (r Rar) Extract(ctx context.Context, sourceArchive io.Reader, handleFile Fi
 		options = append(options, rardecode.Password(r.Password))
 	}
 
-	rr, err := rardecode.NewReader(sourceArchive, options...)
+	if r.FS != nil {
+		options = append(options, rardecode.FileSystem(r.FS))
+	}
+
+	var (
+		rr  rarReader
+		err error
+	)
+
+	// If a name has been provided, then the sourceArchive stream is ignored
+	// and the archive is opened directly via the filesystem (or provided FS).
+	if r.Name != "" {
+		var or *rardecode.ReadCloser
+		if or, err = rardecode.OpenReader(r.Name, options...); err == nil {
+			rr = or
+			defer or.Close()
+		}
+	} else {
+		rr, err = rardecode.NewReader(sourceArchive, options...)
+	}
 	if err != nil {
 		return err
 	}
