@@ -35,10 +35,21 @@ type Rar struct {
 	// Password to open archives.
 	Password string
 
-	// Name for a multi-volume archive
+	// Name for a multi-volume archive. When Name is specified,
+	// the named file is extracted (rather than any io.Reader that
+	// may be passed to Extract). If the archive is a multi-volume
+	// archive, this name will also be used by the decoder to derive
+	// the filename of the next volume in the volume set.
 	Name string
 
-	// FS is an fs.FS exposing the files of the archive.
+	// FS is an fs.FS exposing the files of the archive. Unless Name is
+	// also specified, this does nothing. When Name is also specified,
+	// FS defines the fs.FS that from which the archive will be opened,
+	// and in the case of a multi-volume archive, from where each subsequent
+	// volume of the volume set will be loaded.
+	//
+	// Typically this should be a DirFS pointing at the directory containing
+	// the volumes of the archive.
 	FS fs.FS
 }
 
