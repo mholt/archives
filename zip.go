@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"os"
 	"path"
 	"strings"
 
@@ -215,10 +216,16 @@ func (z Zip) Extract(ctx context.Context, sourceArchive io.Reader, handleFile Fi
 		}
 
 		info := f.FileInfo()
+		linkTarget, err := z.getLinkTarget(f)
+		if err != nil {
+			return fmt.Errorf("getting link target for file %d: %s: %w", i, f.Name, err)
+		}
+
 		file := FileInfo{
 			FileInfo:      info,
 			Header:        f.FileHeader,
 			NameInArchive: f.Name,
+			LinkTarget:    linkTarget,
 			Open: func() (fs.File, error) {
 				openedFile, err := f.Open()
 				if err != nil {
@@ -228,7 +235,7 @@ func (z Zip) Extract(ctx context.Context, sourceArchive io.Reader, handleFile Fi
 			},
 		}
 
-		err := handleFile(ctx, file)
+		err = handleFile(ctx, file)
 		if errors.Is(err, fs.SkipAll) {
 			break
 		} else if errors.Is(err, fs.SkipDir) && file.IsDir() {
@@ -262,6 +269,33 @@ func (z Zip) decodeText(hdr *zip.FileHeader) {
 			}
 		}
 	}
+}
+
+func (z Zip) getLinkTarget(f *zip.File) (string, error) {
+	info := f.FileInfo()
+	// Exit early if not a symlink
+	if info.Mode()&os.ModeSymlink == 0 {
+		return "", nil
+	}
+
+	// Open the file and read the link target
+	file, err := f.Open()
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	const maxLinkTargetSize = 32768
+	linkTargetBytes, err := io.ReadAll(io.LimitReader(file, maxLinkTargetSize))
+	if err != nil {
+		return "", err
+	}
+
+	if len(linkTargetBytes) == maxLinkTargetSize {
+		return "", fmt.Errorf("link target is too large: %d bytes", len(linkTargetBytes))
+	}
+
+	return string(linkTargetBytes), nil
 }
 
 // Insert appends the listed files into the provided Zip archive stream.
