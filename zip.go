@@ -167,10 +167,20 @@ func (z Zip) archiveOneFile(ctx context.Context, zw *zip.Writer, idx int, file F
 		return fmt.Errorf("creating header for file %d: %s: %w", idx, file.Name(), err)
 	}
 
+	// file won't be considered a symlink if FollowSymlinks in FilesFromDisk is true
+	if isSymlink(file) {
+		_, err := w.Write([]byte(file.LinkTarget))
+		if err != nil {
+			return fmt.Errorf("writing link target for file %d: %s: %w", idx, file.Name(), err)
+		}
+		return nil
+	}
+
 	// directories have no file body
 	if file.IsDir() {
 		return nil
 	}
+
 	if err := openAndCopyFile(file, w); err != nil {
 		return fmt.Errorf("writing file %d: %s: %w", idx, file.Name(), err)
 	}

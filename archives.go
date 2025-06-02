@@ -100,14 +100,9 @@ func FilesFromDisk(ctx context.Context, options *FromDiskOptions, filenames map[
 			var linkTarget string
 			if isSymlink(info) {
 				if options != nil && options.FollowSymlinks {
-					// dereference symlinks
-					filename, err = os.Readlink(filename)
+					filename, info, err = followSymlink(filename)
 					if err != nil {
-						return fmt.Errorf("%s: readlink: %w", filename, err)
-					}
-					info, err = os.Stat(filename)
-					if err != nil {
-						return fmt.Errorf("%s: statting dereferenced symlink: %w", filename, err)
+						return err
 					}
 				} else {
 					// preserve symlinks
@@ -328,4 +323,19 @@ func (s *skipList) add(dir string) {
 	if !dontAdd {
 		*s = append(*s, dir)
 	}
+}
+
+func followSymlink(filename string) (string, os.FileInfo, error) {
+	linkPath, err := os.Readlink(filename)
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: readlink: %w", filename, err)
+	}
+	if !path.IsAbs(linkPath) {
+		linkPath = filepath.Join(filepath.Dir(filename), linkPath)
+	}
+	info, err := os.Stat(linkPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("%s: statting dereferenced symlink: %w", filename, err)
+	}
+	return linkPath, info, nil
 }
