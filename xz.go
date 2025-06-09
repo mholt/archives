@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	fastxz "github.com/therootcompany/xz"
+	fastxz "github.com/mikelolasagasti/xz"
 	"github.com/ulikunitz/xz"
 )
 
