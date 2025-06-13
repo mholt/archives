@@ -1,11 +1,13 @@
 package archives
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -266,6 +268,13 @@ func TestNameOnDiskToNameInArchive(t *testing.T) {
 	}
 }
 
+func fixSeparators(path string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ReplaceAll(path, "/", "\\")
+	}
+	return path
+}
+
 func TestFollowSymlink(t *testing.T) {
 	// Create temp directory for tests
 	tmpDir := t.TempDir()
@@ -509,4 +518,47 @@ func TestFollowSymlink(t *testing.T) {
 			t.Errorf("expected error to mention depth limit of 40, got: %v", err)
 		}
 	})
+}
+
+func TestFilesFromDisk_SymlinkOutsideFileNamesMap(t *testing.T) {
+	tmpDir := t.TempDir()
+	otherTmpDir := t.TempDir()
+
+	testDirName := "test_dir"
+	testDir := filepath.Join(otherTmpDir, testDirName)
+	if err := os.Mkdir(testDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	testFileName := "test.txt"
+	testFile := filepath.Join(testDir, testFileName)
+	if err := os.WriteFile(testFile, []byte("test content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	symlinkDirName := "symlink_dir"
+	symlinkDir := filepath.Join(tmpDir, symlinkDirName)
+	if err := os.Symlink(testDir, symlinkDir); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := FilesFromDisk(context.Background(), &FromDiskOptions{
+		FollowSymlinks: true,
+	}, map[string]string{symlinkDir: ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].NameInArchive < files[j].NameInArchive
+	})
+
+	if files[0].NameInArchive != symlinkDirName {
+		t.Fatalf("expected file name '%s', got '%s'", symlinkDirName, files[0].NameInArchive)
+	}
+
+	testFilePath := fmt.Sprintf("%s/%s", symlinkDirName, testFileName)
+	if files[1].NameInArchive != testFilePath {
+		t.Fatalf("expected file name '%s', got '%s'", testFilePath, files[1].NameInArchive)
+	}
 }
