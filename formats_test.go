@@ -464,3 +464,30 @@ func TestIdentifyStreamNil(t *testing.T) {
 		t.Errorf("unexpected format found: expected=.tar.zst actual=%s", format.Extension())
 	}
 }
+
+func TestArchiveGrowingFile(t *testing.T) {
+	tmpTxtFileName, tmpTxtFileInfo := newTmpTextFile(t, "Small file")
+	t.Cleanup(func() {
+		os.RemoveAll(tmpTxtFileName)
+	})
+
+	// Open the file and make it larger
+	tmpFile, err := os.OpenFile(tmpTxtFileName, os.O_WRONLY, 0644)
+	if err != nil {
+		t.Errorf("Failed to open temp file: %v", err)
+	}
+	t.Cleanup(func() {
+		tmpFile.Close()
+	})
+
+	err = os.WriteFile(tmpTxtFileName, []byte("Much longer and larger file size for the second write"), 0644)
+	if err != nil {
+		t.Errorf("Failed to write to temp file: %v", err)
+	}
+
+	// Archive but use the initial file info
+	bytesArchived := archive(t, Tar{}, tmpTxtFileName, tmpTxtFileInfo)
+	if len(bytesArchived) == 0 {
+		t.Errorf("Failed to archive file: %v", err)
+	}
+}
