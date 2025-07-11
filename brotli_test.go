@@ -139,3 +139,106 @@ func generateRandomASCII(rng *deterministicRNG, length int) []byte {
 	}
 	return result
 }
+
+func TestBrotli_Match_SmallStreams(t *testing.T) {
+	// Test very small streams that the original logic was designed to handle
+	type smallStream struct {
+		name string
+		data []byte
+	}
+
+	smallStreams := []smallStream{
+		{
+			name: "empty stream",
+			data: []byte{},
+		},
+		{
+			name: "single byte",
+			data: []byte{'A'},
+		},
+		{
+			name: "two bytes",
+			data: []byte{'A', 'B'},
+		},
+		{
+			name: "three bytes",
+			data: []byte{'A', 'B', 'C'},
+		},
+		{
+			name: "four bytes",
+			data: []byte{'A', 'B', 'C', 'D'},
+		},
+		{
+			name: "small ASCII text (8 bytes)",
+			data: []byte("Hello123"),
+		},
+		{
+			name: "small ASCII text (16 bytes)",
+			data: []byte("Hello world test"),
+		},
+		{
+			name: "small mixed whitespace (8 bytes)",
+			data: []byte("Hi\t\n\r\vx"),
+		},
+		{
+			name: "small binary-like data (4 bytes)",
+			data: []byte{0x00, 0x01, 0x02, 0x03},
+		},
+		{
+			name: "small binary-like data (8 bytes)",
+			data: []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07},
+		},
+		{
+			name: "small binary-like data (16 bytes)",
+			data: []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F},
+		},
+	}
+
+	for _, ss := range smallStreams {
+		// Test uncompressed version (should not match)
+		t.Run(ss.name+"_uncompressed", func(t *testing.T) {
+			r := bytes.NewBuffer(ss.data)
+
+			mr, err := Brotli{}.Match(context.Background(), "", r)
+			if err != nil {
+				t.Errorf("Brotli.Match() error = %v", err)
+				return
+			}
+
+			if mr.ByStream {
+				t.Errorf("Uncompressed small stream incorrectly detected as brotli compressed")
+				t.Logf("Input length: %d", len(ss.data))
+				t.Logf("Input bytes: %v", ss.data)
+				if len(ss.data) > 0 && len(ss.data) <= 32 {
+					t.Logf("Input string: %q", string(ss.data))
+				}
+			}
+		})
+
+		// Test compressed versions across all quality levels (should match)
+		// Skip empty stream compression as it's not meaningful
+		if len(ss.data) > 0 {
+			for quality := 0; quality <= 11; quality++ {
+				t.Run(fmt.Sprintf("%s_brotli_q%d", ss.name, quality), func(t *testing.T) {
+					compressedData := compress(t, ".br", ss.data, Brotli{Quality: quality}.OpenWriter)
+					r := bytes.NewBuffer(compressedData)
+
+					mr, err := Brotli{}.Match(context.Background(), "", r)
+					if err != nil {
+						t.Errorf("Brotli.Match() error = %v", err)
+						return
+					}
+
+					if !mr.ByStream {
+						t.Errorf("Compressed small stream not detected as brotli compressed")
+						t.Logf("Original data length: %d", len(ss.data))
+						t.Logf("Compressed data length: %d", len(compressedData))
+						t.Logf("Quality: %d", quality)
+						t.Logf("Original data: %v", ss.data)
+						t.Logf("Compressed data: %v", compressedData[:min(32, len(compressedData))])
+					}
+				})
+			}
+		}
+	}
+}
