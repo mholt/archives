@@ -14,7 +14,8 @@ func TestBrotli_Match_Stream(t *testing.T) {
 		input   []byte
 		matches bool
 	}
-	for _, tc := range []testcase{
+
+	testCases := []testcase{
 		{
 			name:    "uncompressed yaml",
 			input:   []byte("---\nthis-is-not-brotli: \"it is actually yaml\""),
@@ -25,73 +26,24 @@ func TestBrotli_Match_Stream(t *testing.T) {
 			input:   testTxt,
 			matches: false,
 		},
-		{
-			name:    "text compressed with brotli quality 0",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 0}.OpenWriter),
+	}
+
+	// Test all quality levels (0-11)
+	for quality := 0; quality <= 11; quality++ {
+		testCases = append(testCases, testcase{
+			name:    fmt.Sprintf("text compressed with brotli quality %d", quality),
+			input:   compress(t, ".br", testTxt, Brotli{Quality: quality}.OpenWriter),
 			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 1",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 1}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 2",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 2}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 3",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 3}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 4",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 4}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 5",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 5}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 6",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 6}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 7",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 7}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 8",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 8}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 9",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 9}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 10",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 10}.OpenWriter),
-			matches: true,
-		},
-		{
-			name:    "text compressed with brotli quality 11",
-			input:   compress(t, ".br", testTxt, Brotli{Quality: 11}.OpenWriter),
-			matches: true,
-		},
-	} {
+		})
+	}
+
+	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := bytes.NewBuffer(tc.input)
 
 			mr, err := Brotli{}.Match(context.Background(), "", r)
 			if err != nil {
-				t.Errorf("Brotli.OpenReader() error = %v", err)
+				t.Errorf("Brotli.Match() error = %v", err)
 				return
 			}
 
@@ -116,7 +68,7 @@ func TestBrotli_Fuzzy_Both(t *testing.T) {
 		asciiData := generateRandomASCII(rng, length)
 
 		// Test uncompressed ASCII data (should not match)
-		t.Run(fmt.Sprintf("uncompressed_ascii_%d", i), func(t *testing.T) {
+		t.Run(fmt.Sprintf("ascii_%d", i), func(t *testing.T) {
 			r := bytes.NewBuffer(asciiData)
 
 			mr, err := Brotli{}.Match(context.Background(), "", r)
@@ -133,28 +85,28 @@ func TestBrotli_Fuzzy_Both(t *testing.T) {
 			}
 		})
 
-		// Test actual brotli compressed data (should match)
-		t.Run(fmt.Sprintf("compressed_brotli_%d", i), func(t *testing.T) {
-			// Compress the ASCII data with brotli
-			quality := rng.Intn(200) + 16
-			compressedData := compress(t, ".br", asciiData, Brotli{Quality: quality}.OpenWriter)
+		// Test actual brotli compressed data (should match) - test all quality levels
+		for quality := 0; quality <= 11; quality++ {
+			t.Run(fmt.Sprintf("br_%d_q%d", i, quality), func(t *testing.T) {
+				compressedData := compress(t, ".br", asciiData, Brotli{Quality: quality}.OpenWriter)
 
-			r := bytes.NewBuffer(compressedData)
+				r := bytes.NewBuffer(compressedData)
 
-			mr, err := Brotli{}.Match(context.Background(), "", r)
-			if err != nil {
-				t.Errorf("Brotli.Match() error = %v", err)
-				return
-			}
+				mr, err := Brotli{}.Match(context.Background(), "", r)
+				if err != nil {
+					t.Errorf("Brotli.Match() error = %v", err)
+					return
+				}
 
-			if !mr.ByStream {
-				t.Errorf("Actual brotli compressed data not detected as compressed")
-				t.Logf("Original data: %q", string(asciiData))
-				t.Logf("Compressed length: %d", len(compressedData))
-				t.Logf("Quality used: %d", quality)
-				t.Logf("Compressed bytes: %v", compressedData[:min(32, len(compressedData))])
-			}
-		})
+				if !mr.ByStream {
+					t.Errorf("Actual brotli compressed data not detected as compressed")
+					t.Logf("Original data: %q", string(asciiData))
+					t.Logf("Compressed length: %d", len(compressedData))
+					t.Logf("Quality used: %d", quality)
+					t.Logf("Compressed bytes: %v", compressedData[:min(32, len(compressedData))])
+				}
+			})
+		}
 	}
 }
 

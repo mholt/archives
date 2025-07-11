@@ -38,59 +38,31 @@ func (br Brotli) Match(_ context.Context, filename string, stream io.Reader) (Ma
 
 func isValidBrotliStream(stream io.Reader) bool {
 	// brotli does not have well-defined file headers or a magic number;
-	// the best way to match the stream is probably to try decoding part
-	// of it, but we'll just have to guess a large-enough size that is
-	// still small enough for the smallest streams we'll encounter
+	// the best way to match the stream is to try decoding a small amount
+	// and see if it succeeds without errors
 	input := &bytes.Buffer{}
 	r := brotli.NewReader(io.TeeReader(stream, input))
-	buf := make([]byte, 16)
+	buf := make([]byte, 64)
 
-	// First gauntlet - can the reader even read 16 bytes without an error?
+	// Try to read some data - if it fails, it's likely not brotli
 	n, err := r.Read(buf)
 	if err != nil {
 		return false
 	}
-	buf = buf[:n]
+
+	// Check if decompressed data appears in the raw input
+	// If decompressed data is identical to input, it's likely uncompressed
 	inputBytes := input.Bytes()
-
-	// Second gauntlet - do the decompressed bytes exist in the raw input?
-	// If they don't appear in the first 4 bytes (to account for the up to
-	// 32 bits of initial brotli header) or at all, then chances are the
-	// input was compressed.
-	idx := bytes.Index(inputBytes, buf)
-	if idx < 4 {
-		return true
+	if bytes.Equal(inputBytes, buf[:n]) {
+		return false
 	}
 
-	// The input is assumed to be compressed data, but we still can't be 100% sure.
-	// Try reading more data until we encounter an error.
-	for n < 128 {
-		nn, err := r.Read(buf)
-		switch err {
-		case io.EOF:
-			// If we've reached EOF, we return assuming it's compressed.
-			return true
-		case io.ErrUnexpectedEOF:
-			// If we've encountered a short read, that's probably due to invalid reads due
-			// to the fact it isn't compressed data at all.
-			return false
-		case nil:
-			// No error, no problem. Continue reading.
-			n += nn
-		default:
-			// If we encounter any other error, return it.
-			return false
-		}
-	}
-
-	// If we've read 128+ bytes without error, do a final ASCII check
-	// Compressed data should not be pure ASCII
-	inputBytes = input.Bytes()
+	// If we successfully decompressed data that's different from input,
+	// and the input isn't pure ASCII, it's likely compressed
 	if isASCII(inputBytes) {
 		return false
 	}
 
-	// If we got here, it seems like valid compressed data
 	return true
 }
 
