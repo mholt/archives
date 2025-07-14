@@ -242,3 +242,109 @@ func TestBrotli_Match_SmallStreams(t *testing.T) {
 		}
 	}
 }
+
+func TestBrotli_Fuzzy_Binary(t *testing.T) {
+	// Use a deterministic seed for reproducible tests
+	seed := int64(123)
+	rng := &deterministicRNG{seed: seed}
+
+	// Test random binary data (should not match)
+	numTests := 300
+	for i := 0; i < numTests; i++ {
+		// Generate random binary data of varying lengths
+		length := rng.Intn(500) + 16
+		binaryData := generateRandomBinary(rng, length)
+
+		// Test uncompressed binary data (should not match)
+		t.Run(fmt.Sprintf("binary_%d", i), func(t *testing.T) {
+			r := bytes.NewBuffer(binaryData)
+
+			mr, err := Brotli{}.Match(context.Background(), "", r)
+			if err != nil {
+				t.Errorf("Brotli.Match() error = %v", err)
+				return
+			}
+
+			if mr.ByStream {
+				t.Errorf("Random binary data incorrectly detected as brotli compressed")
+				t.Logf("Data length: %d", len(binaryData))
+				t.Logf("First 32 bytes: %v", binaryData[:min(32, len(binaryData))])
+
+				// Count ASCII vs non-ASCII bytes for debugging
+				// asciiCount := 0
+				// for _, b := range binaryData {
+				// 	if isASCIIByte(b) {
+				// 		asciiCount++
+				// 	}
+				// }
+				// t.Logf("ASCII bytes: %d/%d (%.1f%%)", asciiCount, len(binaryData), float64(asciiCount)/float64(len(binaryData))*100)
+			}
+		})
+
+		// Test actual brotli compressed binary data (should match) - test all quality levels
+		for quality := 0; quality <= 11; quality++ {
+			t.Run(fmt.Sprintf("binary_br_%d_q%d", i, quality), func(t *testing.T) {
+				compressedData := compress(t, ".br", binaryData, Brotli{Quality: quality}.OpenWriter)
+
+				r := bytes.NewBuffer(compressedData)
+
+				mr, err := Brotli{}.Match(context.Background(), "", r)
+				if err != nil {
+					t.Errorf("Brotli.Match() error = %v", err)
+					return
+				}
+
+				if !mr.ByStream {
+					t.Errorf("Actual brotli compressed binary data not detected as compressed")
+					t.Logf("Original binary length: %d", len(binaryData))
+					t.Logf("Compressed length: %d", len(compressedData))
+					t.Logf("Quality used: %d", quality)
+					t.Logf("Original first 32 bytes: %v", binaryData[:min(32, len(binaryData))])
+					t.Logf("Compressed first 32 bytes: %v", compressedData[:min(32, len(compressedData))])
+				}
+			})
+		}
+	}
+}
+
+// generateRandomBinary creates random binary data with all possible byte values
+func generateRandomBinary(rng *deterministicRNG, length int) []byte {
+	result := make([]byte, length)
+	for i := 0; i < length; i++ {
+		// Generate all possible byte values (0-255)
+		result[i] = byte(rng.Intn(256))
+	}
+	return result
+}
+
+// Uses https://github.com/bufbuild/buf/releases/download/v1.54.0/buf-Darwin-arm64
+// func TestBrotliDetection(t *testing.T) {
+// 	// Test brotli detection on the testdata/buf-Darwin-arm64 file
+// 	testFile := "testdata/buf-Darwin-arm64"
+
+// 	// Open the test file
+// 	file, err := os.Open(testFile)
+// 	if err != nil {
+// 		t.Fatalf("failed to open test file %s: %v", testFile, err)
+// 	}
+// 	defer file.Close()
+
+// 	// Create a brotli format instance
+// 	br := Brotli{Quality: 6}
+
+// 	// Test matching by stream
+// 	matchResult, err := br.Match(context.Background(), testFile, file)
+// 	if err != nil {
+// 		t.Fatalf("Match failed: %v", err)
+// 	}
+
+// 	// The file should not be detected as brotli by name (no .br extension)
+// 	if matchResult.ByName {
+// 		t.Error("File should not be detected as brotli by name (no .br extension)")
+// 	}
+
+// 	// The file should not be detected as brotli by stream content
+// 	if matchResult.ByStream {
+// 		t.Error("File should not be detected as brotli by stream content")
+// 	}
+// }
