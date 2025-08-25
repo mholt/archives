@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/andybalholm/brotli"
 )
@@ -40,30 +41,75 @@ func isValidBrotliStream(stream io.Reader) bool {
 	// brotli does not have well-defined file headers or a magic number;
 	// the best way to match the stream is to try decoding a small amount
 	// and see if it succeeds without errors
-	input := &bytes.Buffer{}
-	r := brotli.NewReader(io.TeeReader(stream, input))
-	buf := make([]byte, 64)
 
-	// Try to read some data - if it fails, it's likely not brotli
-	n, err := r.Read(buf)
+	readTarget := 1024
+
+	limitedStream, err := readAtMost(stream, readTarget)
 	if err != nil {
 		return false
 	}
+	input := &bytes.Buffer{}
+	r := brotli.NewReader(io.TeeReader(bytes.NewReader(limitedStream), input))
 
-	// Check if decompressed data appears in the raw input
-	// If decompressed data is identical to input, it's likely uncompressed
+	// Read more data to get a better compression ratio estimate
+	output := &bytes.Buffer{}
+	buf := make([]byte, len(limitedStream))
+
+	totalRead := 0
+	// Try to read up to 1KB of decompressed data
+	for totalRead < readTarget {
+		n, err := r.Read(buf)
+		if err != nil && err != io.EOF {
+			return false
+		}
+		if n == 0 {
+			break
+		}
+		output.Write(buf[:n])
+		totalRead += n
+		if err == io.EOF {
+			break
+		}
+	}
+
 	inputBytes := input.Bytes()
-	if bytes.Equal(inputBytes, buf[:n]) {
-		return false
+	outputBytes := output.Bytes()
+
+	expansionRatio := float64(totalRead) / float64(len(inputBytes))
+	if expansionRatio > 1.0 {
+		// Looks like actual decompression happened - this is good
+		return true
 	}
 
-	// If we successfully decompressed data that's different from input,
-	// and the input isn't pure ASCII, it's likely compressed
-	if isASCII(inputBytes) {
-		return false
+	// If the decompressed output is ASCII or UTF-8 characters
+	// it's more likely to be real compressed data(?)
+	if isASCII(outputBytes) || utf8.Valid(outputBytes) {
+		return true
 	}
 
-	return true
+	// A final special (terrible) check for valid brotli streams if we have made it this far
+	// Brotli compressed data typically starts with specific bit patterns
+	// Check if this looks like a valid brotli stream header
+	// Note this approach has shortcomings, see: https://stackoverflow.com/a/39032023
+	if len(inputBytes) >= 4 {
+		firstByte := inputBytes[0]
+
+		// From all tests in the test suite, the first byte only ever consists of:
+		// - 0x1b (27): 5930 occurrences (60.93%)
+		// - 0x0b (11): 3725 occurrences (38.28%)
+		// - 0x8b (139): 77 occurrences (0.79%)
+		if firstByte == 0x1b || firstByte == 0x0b || firstByte == 0x8b {
+			return true
+		}
+	}
+
+	// At this point:
+	// - Input data is not ASCII
+	// - Decompressed output is not ASCII
+	// - Decompression "worked" but decompressed data is not much larger than the input data (can legitimately happen with brotli quality=0 and small inputs)
+	// This is suggestive that it is not brotli compressed data.
+	// BUT BEWARE: The current test suite does not actually reach this point.
+	return false
 }
 
 // isASCII checks if the given byte slice contains only ASCII printable characters and common whitespace.

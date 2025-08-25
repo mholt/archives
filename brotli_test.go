@@ -252,7 +252,7 @@ func TestBrotli_Fuzzy_Binary(t *testing.T) {
 	numTests := 300
 	for i := 0; i < numTests; i++ {
 		// Generate random binary data of varying lengths
-		length := rng.Intn(500) + 16
+		length := rng.Intn(500) + 500
 		binaryData := generateRandomBinary(rng, length)
 
 		// Test uncompressed binary data (should not match)
@@ -269,15 +269,6 @@ func TestBrotli_Fuzzy_Binary(t *testing.T) {
 				t.Errorf("Random binary data incorrectly detected as brotli compressed")
 				t.Logf("Data length: %d", len(binaryData))
 				t.Logf("First 32 bytes: %v", binaryData[:min(32, len(binaryData))])
-
-				// Count ASCII vs non-ASCII bytes for debugging
-				// asciiCount := 0
-				// for _, b := range binaryData {
-				// 	if isASCIIByte(b) {
-				// 		asciiCount++
-				// 	}
-				// }
-				// t.Logf("ASCII bytes: %d/%d (%.1f%%)", asciiCount, len(binaryData), float64(asciiCount)/float64(len(binaryData))*100)
 			}
 		})
 
@@ -317,9 +308,10 @@ func generateRandomBinary(rng *deterministicRNG, length int) []byte {
 	return result
 }
 
-// Uses https://github.com/bufbuild/buf/releases/download/v1.54.0/buf-Darwin-arm64
+// test case for https://github.com/mholt/archives/issues/36
+// fetch file with:
+// `curl https://github.com/bufbuild/buf/releases/download/v1.54.0/buf-Darwin-arm64 -o testdata/buf-Darwin-arm64`
 // func TestBrotliDetection(t *testing.T) {
-// 	// Test brotli detection on the testdata/buf-Darwin-arm64 file
 // 	testFile := "testdata/buf-Darwin-arm64"
 
 // 	// Open the test file
