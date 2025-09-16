@@ -640,7 +640,7 @@ func (f *ArchiveFS) ReadDir(name string) ([]fs.DirEntry, error) {
 			return &fs.PathError{Op: "readdir", Path: name, Err: errors.New("not a directory")}
 		}
 
-		// index this file info for quick access
+		// index this file info for quick access (overwrite any implicit one that may have been created)
 		f.contents[file.NameInArchive] = file
 
 		// amortize the DirEntry list per directory, and prefer the real entry's DirEntry over an implicit/fake
@@ -681,6 +681,16 @@ func (f *ArchiveFS) ReadDir(name string) ([]fs.DirEntry, error) {
 			})
 			if !found {
 				f.dirs[dir] = slices.Insert(f.dirs[dir], idx, dirInfo)
+			}
+
+			// we also need to treat implicit directories as real ones for the sake of FS traversal,
+			// so be sure to add to our amortization cache an implicit FileInfo for each parent dir
+			// that doesn't have an explicit entry in the archive; this will get overwritten with
+			// a real one if we encounter it, but without filling in the implied directory tree,
+			// FS walks *after the first one* (the first one doesn't use the contents cache) will
+			// omit all implicit directories from their walk, missing many contents!
+			if _, ok := f.contents[dir]; !ok {
+				f.contents[dir] = dirInfo.(fs.FileInfo)
 			}
 		}
 
