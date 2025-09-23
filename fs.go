@@ -538,6 +538,11 @@ func (f ArchiveFS) Stat(name string) (fs.FileInfo, error) {
 		if info, ok := f.contents[name]; ok {
 			return info, nil
 		}
+		if _, ok := f.dirs[name]; ok {
+			// possible that the requested file is an implicit directory; pretend
+			// it exists, since they'll be able to open it and walk it too
+			return implicitDirInfo{implicitDirEntry: implicitDirEntry{name: name}}, nil
+		}
 		return nil, &fs.PathError{Op: "stat", Path: name, Err: fmt.Errorf("stat(b) %s: %w", name, fs.ErrNotExist)}
 	}
 
