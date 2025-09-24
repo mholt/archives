@@ -22,7 +22,7 @@ type Brotli struct {
 func (Brotli) Extension() string { return ".br" }
 func (Brotli) MediaType() string { return "application/x-br" }
 
-func (br Brotli) Match(_ context.Context, filename string, stream io.Reader) (MatchResult, error) {
+func (br Brotli) Match(ctx context.Context, filename string, stream io.Reader) (MatchResult, error) {
 	var mr MatchResult
 
 	// match filename
@@ -31,13 +31,13 @@ func (br Brotli) Match(_ context.Context, filename string, stream io.Reader) (Ma
 	}
 
 	if stream != nil {
-		mr.ByStream = isValidBrotliStream(stream)
+		mr.ByStream = br.isValidBrotliStream(ctx, stream)
 	}
 
 	return mr, nil
 }
 
-func isValidBrotliStream(stream io.Reader) bool {
+func (br Brotli) isValidBrotliStream(ctx context.Context, stream io.Reader) bool {
 	// brotli does not have well-defined file headers or a magic number;
 	// the best way to match the stream is to try decoding a small amount
 	// and see if it succeeds without errors
@@ -74,6 +74,20 @@ func isValidBrotliStream(stream io.Reader) bool {
 
 	inputBytes := input.Bytes()
 	outputBytes := output.Bytes()
+
+	// the brotli detection often has false positives; while it is bad if we think it's brotli and it's
+	// actually not compressed, it's truly tragic when we think it's brotli but it's actually another
+	// format that we would/do properly detect -- avoid stepping on other formats
+	for _, format := range formats {
+		if format.Extension() == br.Extension() {
+			continue
+		}
+		// this is not super efficient; we could probably handle this brotli special case a little better
+		result, _ := format.Match(ctx, "", bytes.NewReader(inputBytes))
+		if result.Matched() {
+			return false
+		}
+	}
 
 	expansionRatio := float64(totalRead) / float64(len(inputBytes))
 	if expansionRatio > 1.0 {
