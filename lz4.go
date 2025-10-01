@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"strings"
 
 	"github.com/pierrec/lz4/v4"
+
+	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -25,7 +26,7 @@ func (lz Lz4) Match(_ context.Context, filename string, stream io.Reader) (Match
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), lz.Extension()) {
+	if extensions.Contains(filename, lz.Extension()) {
 		mr.ByName = true
 	}
 

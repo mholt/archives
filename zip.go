@@ -19,6 +19,8 @@ import (
 	"github.com/klauspost/compress/zip"
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
+
+	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -85,7 +87,7 @@ func (z Zip) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), z.Extension()) {
+	if extensions.Contains(filename, z.Extension()) {
 		mr.ByName = true
 	}
 

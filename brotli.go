@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/andybalholm/brotli"
+
+	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -26,7 +27,7 @@ func (br Brotli) Match(ctx context.Context, filename string, stream io.Reader) (
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), br.Extension()) {
+	if extensions.Contains(filename, br.Extension()) {
 		mr.ByName = true
 	}
 
