@@ -19,6 +19,12 @@ type Tar struct {
 	// If true, use GNU header format
 	FormatGNU bool
 
+	// If true, use PAX header format
+	FormatPAX bool
+
+	// If true, use USTAR header format
+	FormatUSTAR bool
+
 	// If true, preserve only numeric user and group id
 	NumericUIDGID bool
 
@@ -104,6 +110,12 @@ func (t Tar) writeFileToArchive(ctx context.Context, tw *tar.Writer, file FileIn
 	}
 	if t.FormatGNU {
 		hdr.Format = tar.FormatGNU
+	}
+	if t.FormatPAX {
+		hdr.Format = tar.FormatPAX
+	}
+	if t.FormatUSTAR {
+		hdr.Format = tar.FormatUSTAR
 	}
 	if t.NumericUIDGID {
 		hdr.Uname = ""
