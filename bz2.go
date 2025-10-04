@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"strings"
 
 	"github.com/dsnet/compress/bzip2"
+
+	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -25,7 +26,7 @@ func (bz Bz2) Match(_ context.Context, filename string, stream io.Reader) (Match
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), bz.Extension()) {
+	if extensions.Contains(filename, bz.Extension()) {
 		mr.ByName = true
 	}
 
