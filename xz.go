@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
+	"strings"
 
 	fastxz "github.com/mikelolasagasti/xz"
 	"github.com/ulikunitz/xz"
-
-	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -25,7 +25,7 @@ func (x Xz) Match(_ context.Context, filename string, stream io.Reader) (MatchRe
 	var mr MatchResult
 
 	// match filename
-	if extensions.Contains(filename, x.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == x.Extension() {
 		mr.ByName = true
 	}
 

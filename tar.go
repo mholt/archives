@@ -8,8 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
-
-	"github.com/mholt/archives/internal"
+	"strings"
 )
 
 func init() {
@@ -48,7 +47,7 @@ func (t Tar) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	var mr MatchResult
 
 	// match filename
-	if extensions.Contains(filename, t.Extension()) {
+	if strings.Contains(strings.ToLower(filename), t.Extension()) {
 		mr.ByName = true
 	}
 

@@ -10,11 +10,11 @@ import (
 	"log"
 	"os"
 	"path"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/nwaples/rardecode/v2"
-
-	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -61,7 +61,7 @@ func (r Rar) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	var mr MatchResult
 
 	// match filename
-	if extensions.Contains(filename, r.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == r.Extension() {
 		mr.ByName = true
 	}
 

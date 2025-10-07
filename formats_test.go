@@ -114,6 +114,44 @@ func checkErr(t *testing.T, err error, msgFmt string, args ...any) {
 	t.Fatalf(msgFmt+": %s", args...)
 }
 
+func TestIdentifyFindFormatByFileName(t *testing.T) {
+	tests := []struct {
+		filename string
+		expected string
+	}{
+		{
+			filename: "test.tar",
+			expected: ".tar",
+		},
+		{
+			filename: "test.tar.bz2",
+			expected: ".tar.bz2",
+		},
+		{
+			filename: "test.tar.br",
+			expected: ".tar.br",
+		},
+		{
+			filename: "test.tar.bru",
+			expected: ".tar",
+		},
+		{
+			filename: "test.7z",
+			expected: ".7z",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			format, _, err := Identify(context.Background(), tt.filename, nil)
+			checkErr(t, err, "identifying")
+			if format.Extension() != tt.expected {
+				t.Errorf("unexpected extension: %v, expected: %v", format.Extension(), tt.expected)
+			}
+		})
+	}
+}
+
 func TestIdentifyDoesNotMatchContentFromTrimmedKnownHeaderHaving0Suffix(t *testing.T) {
 	// Using the outcome of `n, err := io.ReadFull(stream, buf)` without minding n
 	// may lead to a mis-characterization for cases with known header ending with 0x0

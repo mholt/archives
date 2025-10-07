@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
+	"strings"
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/pgzip"
-
-	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -38,7 +38,7 @@ func (gz Gz) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	var mr MatchResult
 
 	// match filename
-	if extensions.Contains(filename, gz.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == gz.Extension() {
 		mr.ByName = true
 	}
 

@@ -3,10 +3,10 @@ package archives
 import (
 	"context"
 	"io"
+	"path/filepath"
+	"strings"
 
 	"github.com/klauspost/compress/zlib"
-
-	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -25,7 +25,7 @@ func (zz Zlib) Match(_ context.Context, filename string, stream io.Reader) (Matc
 	var mr MatchResult
 
 	// match filename
-	if extensions.Contains(filename, zz.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == zz.Extension() {
 		mr.ByName = true
 	}
 

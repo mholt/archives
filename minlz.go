@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
+	"strings"
 
 	"github.com/minio/minlz"
-
-	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -27,7 +27,7 @@ func (mz MinLZ) Match(_ context.Context, filename string, stream io.Reader) (Mat
 	var mr MatchResult
 
 	// match filename
-	if extensions.Contains(filename, mz.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == mz.Extension() {
 		mr.ByName = true
 	}
 

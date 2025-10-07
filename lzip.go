@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
+	"strings"
 
 	"github.com/sorairolake/lzip-go"
-
-	"github.com/mholt/archives/internal"
 )
 
 func init() {
@@ -24,7 +24,7 @@ func (lz Lzip) Match(_ context.Context, filename string, stream io.Reader) (Matc
 	var mr MatchResult
 
 	// match filename
-	if extensions.EndsWith(filename, lz.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == lz.Extension() {
 		mr.ByName = true
 	}
 
