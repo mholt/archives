@@ -23,7 +23,6 @@ func init() {
 type rarReader interface {
 	Next() (*rardecode.FileHeader, error)
 	io.Reader
-	io.WriterTo
 }
 
 type Rar struct {

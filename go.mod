@@ -9,7 +9,7 @@ require (
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707
 	github.com/klauspost/compress v1.18.0
 	github.com/klauspost/pgzip v1.2.6
-	github.com/nwaples/rardecode/v2 v2.1.1
+	github.com/nwaples/rardecode/v2 v2.2.0
 )
 
 require (
