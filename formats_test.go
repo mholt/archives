@@ -118,35 +118,63 @@ func TestIdentifyFindFormatByFileName(t *testing.T) {
 	tests := []struct {
 		filename string
 		expected string
+		shouldError bool
 	}{
 		{
 			filename: "test.tar",
 			expected: ".tar",
+			shouldError: false,
 		},
 		{
 			filename: "test.tar.bz2",
 			expected: ".tar.bz2",
+			shouldError: false,
 		},
 		{
 			filename: "test.tar.br",
 			expected: ".tar.br",
+			shouldError: false,
 		},
 		{
 			filename: "test.tar.bru",
 			expected: ".tar",
+			shouldError: false,
 		},
 		{
 			filename: "test.7z",
 			expected: ".7z",
+			shouldError: false,
+		},
+		{
+			filename: "test.tartest",
+			expected: "",
+			shouldError: true,
+		},
+		{
+			filename: "testtar.test",
+			expected: "",
+			shouldError: true,
+		},
+		{
+			filename: "testtar.gz",
+			expected: ".gz",
+			shouldError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.filename, func(t *testing.T) {
 			format, _, err := Identify(context.Background(), tt.filename, nil)
-			checkErr(t, err, "identifying")
-			if format.Extension() != tt.expected {
-				t.Errorf("unexpected extension: %v, expected: %v", format.Extension(), tt.expected)
+			if tt.shouldError {
+				if err == nil {
+					t.Errorf("unexpected success")
+				}
+			} else {
+				checkErr(t, err, "identifying")
+
+				if format.Extension() != tt.expected {
+					t.Errorf("unexpected extension: %v, expected: %v", format.Extension(), tt.expected)
+				}
 			}
 		})
 	}
