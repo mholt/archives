@@ -160,6 +160,11 @@ func TestIdentifyFindFormatByFileName(t *testing.T) {
 			expected: ".gz",
 			shouldError: false,
 		},
+		{
+			filename: "tar.tartest.zip",
+			expected: ".zip",
+			shouldError: false,
+		},
 	}
 
 	for _, tt := range tests {
