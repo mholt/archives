@@ -27,7 +27,7 @@ func (mz MinLZ) Match(_ context.Context, filename string, stream io.Reader) (Mat
 	var mr MatchResult
 
 	// match filename
-	if filepath.Ext(strings.ToLower(filename)) == ".mz" {
+	if filepath.Ext(strings.ToLower(filename)) == mz.Extension() {
 		mr.ByName = true
 	}
 

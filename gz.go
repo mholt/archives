@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/klauspost/compress/gzip"
@@ -37,7 +38,7 @@ func (gz Gz) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), gz.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == gz.Extension() {
 		mr.ByName = true
 	}
 

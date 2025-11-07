@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -26,7 +27,7 @@ func (br Brotli) Match(ctx context.Context, filename string, stream io.Reader) (
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), br.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == br.Extension() {
 		mr.ByName = true
 	}
 

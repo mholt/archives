@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/pierrec/lz4/v4"
@@ -25,7 +26,7 @@ func (lz Lz4) Match(_ context.Context, filename string, stream io.Reader) (Match
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), lz.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == lz.Extension() {
 		mr.ByName = true
 	}
 

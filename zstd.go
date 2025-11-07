@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -26,7 +27,7 @@ func (zs Zstd) Match(_ context.Context, filename string, stream io.Reader) (Matc
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), zs.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == zs.Extension() {
 		mr.ByName = true
 	}
 

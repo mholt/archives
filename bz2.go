@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/dsnet/compress/bzip2"
@@ -25,7 +26,7 @@ func (bz Bz2) Match(_ context.Context, filename string, stream io.Reader) (Match
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), bz.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == bz.Extension() {
 		mr.ByName = true
 	}
 

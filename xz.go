@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 
 	fastxz "github.com/mikelolasagasti/xz"
@@ -24,7 +25,7 @@ func (x Xz) Match(_ context.Context, filename string, stream io.Reader) (MatchRe
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), x.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == x.Extension() {
 		mr.ByName = true
 	}
 

@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	szip "github.com/STARRY-S/zip"
@@ -85,7 +86,7 @@ func (z Zip) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), z.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == z.Extension() {
 		mr.ByName = true
 	}
 

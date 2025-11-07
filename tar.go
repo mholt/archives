@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"slices"
 	"strings"
 )
 
@@ -52,8 +53,12 @@ func (Tar) MediaType() string { return "application/x-tar" }
 func (t Tar) Match(_ context.Context, filename string, stream io.Reader) (MatchResult, error) {
 	var mr MatchResult
 
-	// match filename
-	if strings.Contains(strings.ToLower(filename), t.Extension()) {
+    extensions := strings.Split(strings.ToLower(filename), ".")
+    // first item is the file name so drop it
+	extensions = extensions[1:]
+
+    // match filename
+	if slices.Contains(extensions, strings.Trim(t.Extension(), ".")) {
 		mr.ByName = true
 	}
 

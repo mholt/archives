@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"path/filepath"
 	"strings"
 
 	"github.com/bodgit/sevenzip"
@@ -37,7 +38,7 @@ func (z SevenZip) Match(_ context.Context, filename string, stream io.Reader) (M
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), z.Extension()) {
+	if filepath.Ext(strings.ToLower(filename)) == z.Extension() {
 		mr.ByName = true
 	}
 

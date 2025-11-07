@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/klauspost/compress/s2"
@@ -51,8 +52,8 @@ func (sz Sz) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	var mr MatchResult
 
 	// match filename
-	if strings.Contains(strings.ToLower(filename), sz.Extension()) ||
-		strings.Contains(strings.ToLower(filename), ".s2") {
+	if filepath.Ext(strings.ToLower(filename)) == sz.Extension() ||
+		filepath.Ext(strings.ToLower(filename)) == ".s2" {
 		mr.ByName = true
 	}
 
