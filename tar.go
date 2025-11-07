@@ -48,7 +48,10 @@ func (t Tar) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	var mr MatchResult
 
     extensions := strings.Split(strings.ToLower(filename), ".")
-	// match filename
+    // first item is the file name so drop it
+	extensions = extensions[1:]
+
+    // match filename
 	if slices.Contains(extensions, strings.Trim(t.Extension(), ".")) {
 		mr.ByName = true
 	}
