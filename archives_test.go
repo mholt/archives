@@ -3,6 +3,7 @@ package archives
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"testing/fstest"
+	"time"
 )
 
 func TestTrimTopDir(t *testing.T) {
@@ -260,7 +263,7 @@ func TestNameOnDiskToNameInArchive(t *testing.T) {
 			continue
 		}
 
-		actual := nameOnDiskToNameInArchive(tc.nameOnDisk, tc.rootOnDisk, tc.rootInArchive)
+		actual := nameOnDiskToNameInArchive(tc.nameOnDisk, tc.rootOnDisk, tc.rootInArchive, string(filepath.Separator))
 		if actual != tc.expect {
 			t.Errorf("Test %d: Got '%s' but expected '%s' (nameOnDisk=%s rootOnDisk=%s rootInArchive=%s)",
 				i, actual, tc.expect, tc.nameOnDisk, tc.rootOnDisk, tc.rootInArchive)
@@ -561,4 +564,88 @@ func TestFilesFromDisk_SymlinkOutsideFileNamesMap(t *testing.T) {
 	if files[1].NameInArchive != testFilePath {
 		t.Fatalf("expected file name '%s', got '%s'", testFilePath, files[1].NameInArchive)
 	}
+}
+
+func TestFilesFromFS(t *testing.T) {
+	now := time.Now()
+	testfs := fstest.MapFS{
+		"file-a.txt": &fstest.MapFile{
+			Data:    []byte("file-a"),
+			Mode:    0o644,
+			ModTime: now,
+			Sys:     nil,
+		},
+		"dir/file-b.txt": &fstest.MapFile{
+			Data:    []byte("file-b"),
+			Mode:    0o644,
+			ModTime: now,
+			Sys:     nil,
+		},
+		"dir/subdir/file-c.txt": &fstest.MapFile{
+			Data:    []byte("file-c"),
+			Mode:    0o644,
+			ModTime: now,
+			Sys:     nil,
+		},
+	}
+
+	t.Run("maps FS as-is without arguments", func(t *testing.T) {
+		files, err := FilesFromFS(t.Context(), testfs, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for filename, _ := range testfs {
+			found := false
+			for _, fi := range files {
+				if filename == fi.NameInArchive {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected to find a file named %q, but did not find it.", filename)
+			}
+		}
+	})
+
+	t.Run("maps subset of the FS filtered based on provided filenames", func(t *testing.T) {
+		files, err := FilesFromFS(t.Context(), testfs, nil, map[string]string{
+			"dir/subdir": "",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(files) != 2 {
+			t.Errorf("expected 2 entries to be mapped, but got %d", len(files))
+		}
+	})
+
+	t.Run("passing in options.ClearAttributes remove file attributes", func(t *testing.T) {
+		options := &FromFSOptions{ClearAttributes: true}
+		files, err := FilesFromFS(t.Context(), testfs, options, map[string]string{
+			"file-a.txt": "file-a.txt",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		file := files[0]
+		if file.ModTime().Equal(now) {
+			t.Errorf("expected file.ModTime to have been cleared, but got %q instead", file.ModTime())
+		}
+	})
+
+	t.Run("returns an error when fs.FS contains a symlink", func(t *testing.T) {
+		testfs = fstest.MapFS{
+			"symlink": &fstest.MapFile{
+				Mode: fs.ModeSymlink,
+			},
+		}
+
+		_, err := FilesFromFS(t.Context(), testfs, nil, nil)
+		if err == nil {
+			t.Error("expected to get an error, but got nil.")
+		}
+	})
 }
