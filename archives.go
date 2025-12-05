@@ -159,9 +159,7 @@ func FilesFromDisk(ctx context.Context, options *FromDiskOptions, filenames map[
 // in a slash will enumerate contents only, without adding the folder itself
 // to the archive.
 //
-// Map values should use slash ('/') as the separator regardless of
-// the platform, as most archive formats standardize on that rune as the
-// directory separator for filenames within an archive. For convenience, map
+// Map values should use slash ('/') as the separator. For convenience, map
 // values that are empty string are interpreted as the base name of the file
 // (sans path) in the root of the archive; and map values that end in a slash
 // will use the base name of the file in that folder of the archive.
