@@ -90,7 +90,7 @@ func FilesFromDisk(ctx context.Context, options *FromDiskOptions, filenames map[
 				return err
 			}
 
-			nameInArchive := nameOnDiskToNameInArchive(filename, rootOnDisk, rootInArchive, string(filepath.Separator))
+			nameInArchive := nameOnDiskToNameInArchive(filename, rootOnDisk, rootInArchive, filepath.Separator)
 			// this is the root folder and we are adding its contents to target rootInArchive
 			if info.IsDir() && nameInArchive == "" {
 				return nil
@@ -193,7 +193,7 @@ func FilesFromFS(ctx context.Context, fsys fs.FS, options *FromFSOptions, filena
 				return err
 			}
 
-			nameInArchive := nameOnDiskToNameInArchive(filename, rootOnFS, rootInArchive, "/")
+			nameInArchive := nameOnDiskToNameInArchive(filename, rootOnFS, rootInArchive, '/')
 			// this is the root folder and we are adding its contents to target rootInArchive
 			if info.IsDir() && nameInArchive == "" {
 				return nil
@@ -235,13 +235,13 @@ func FilesFromFS(ctx context.Context, fsys fs.FS, options *FromFSOptions, filena
 // respecting rules defined by FilesFromDisk. nameOnDisk is the full filename on disk
 // which is expected to be prefixed by rootOnDisk (according to fs.WalkDirFunc godoc)
 // and which will be placed into a folder rootInArchive in the archive.
-func nameOnDiskToNameInArchive(nameOnDisk, rootOnDisk, rootInArchive, separator string) string {
+func nameOnDiskToNameInArchive(nameOnDisk, rootOnDisk, rootInArchive string, separator rune) string {
 	// These manipulations of rootInArchive could be done just once instead of on
 	// every walked file since they don't rely on nameOnDisk which is the only
 	// variable that changes during the walk, but combining all the logic into this
 	// one function is easier to reason about and test. I suspect the performance
 	// penalty is insignificant.
-	if strings.HasSuffix(rootOnDisk, separator) {
+	if strings.HasSuffix(rootOnDisk, string(separator)) {
 		// "map keys that end in a separator will enumerate contents only,
 		// without adding the folder itself to the archive."
 		rootInArchive = trimTopDir(rootInArchive)

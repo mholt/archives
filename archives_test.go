@@ -263,7 +263,7 @@ func TestNameOnDiskToNameInArchive(t *testing.T) {
 			continue
 		}
 
-		actual := nameOnDiskToNameInArchive(tc.nameOnDisk, tc.rootOnDisk, tc.rootInArchive, string(filepath.Separator))
+		actual := nameOnDiskToNameInArchive(tc.nameOnDisk, tc.rootOnDisk, tc.rootInArchive, filepath.Separator)
 		if actual != tc.expect {
 			t.Errorf("Test %d: Got '%s' but expected '%s' (nameOnDisk=%s rootOnDisk=%s rootInArchive=%s)",
 				i, actual, tc.expect, tc.nameOnDisk, tc.rootOnDisk, tc.rootInArchive)
