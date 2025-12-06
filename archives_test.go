@@ -636,16 +636,79 @@ func TestFilesFromFS(t *testing.T) {
 		}
 	})
 
-	t.Run("returns an error when fs.FS contains a symlink", func(t *testing.T) {
+	t.Run("supports symlinks", func(t *testing.T) {
+		symlinkName := "symlink"
+		symlinkTarget := "dir/symlink-target.file"
 		testfs = fstest.MapFS{
-			"symlink": &fstest.MapFile{
+			symlinkName: &fstest.MapFile{
 				Mode: fs.ModeSymlink,
+				Data: []byte(symlinkTarget),
+			},
+			symlinkTarget: &fstest.MapFile{
+				Mode:    0o644,
+				Data:    []byte("symlink-target"),
+				ModTime: time.Now(),
+				Sys:     nil,
 			},
 		}
 
-		_, err := FilesFromFS(t.Context(), testfs, nil, nil)
-		if err == nil {
-			t.Error("expected to get an error, but got nil.")
+		files, err := FilesFromFS(t.Context(), testfs, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		symlinkFound := false
+		for _, f := range files {
+			if f.NameInArchive != symlinkName {
+				continue
+			}
+			symlinkFound = true
+			if f.LinkTarget != symlinkTarget {
+				t.Fatalf("expected file.LinkTarget to be %q, but got %q", symlinkTarget, f.LinkTarget)
+			}
+		}
+
+		if !symlinkFound {
+			t.Fatal("expected a symlink to be found, but it was not")
+		}
+	})
+
+	t.Run("supports following symlinks", func(t *testing.T) {
+		symlinkName := "symlink"
+		symlinkTarget := "dir/symlink-target.file"
+		testfs = fstest.MapFS{
+			symlinkName: &fstest.MapFile{
+				Mode: fs.ModeSymlink,
+				Data: []byte(symlinkTarget),
+			},
+			symlinkTarget: &fstest.MapFile{
+				Mode:    0o644,
+				Data:    []byte("symlink-target"),
+				ModTime: time.Now(),
+				Sys:     nil,
+			},
+		}
+
+		options := &FromFSOptions{FollowSymlinks: true}
+		files, err := FilesFromFS(t.Context(), testfs, options, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		symlinkFound := false
+		for _, f := range files {
+			if f.NameInArchive != symlinkName {
+				continue
+			}
+
+			symlinkFound = true
+			if isSymlink(f.FileInfo) {
+				t.Fatal("expected symlink to be deferenced, but it was not")
+			}
+		}
+
+		if !symlinkFound {
+			t.Fatal("expected a symlink to be found, but it was not")
 		}
 	})
 }

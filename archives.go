@@ -202,7 +202,32 @@ func FilesFromFS(ctx context.Context, fsys fs.FS, options *FromFSOptions, filena
 			// handle symbolic links
 			var linkTarget string
 			if isSymlink(info) {
-				return fmt.Errorf("symlinks are not supported for fs.FS")
+				if options != nil && options.FollowSymlinks {
+					originalFilename := filename
+					filename, info, err = followSymlinkFS(fsys, filename)
+					if err != nil {
+						return err
+					}
+					if info.IsDir() {
+						subFsys, err := fs.Sub(fsys, filename)
+						if err != nil {
+							return fmt.Errorf("getting subtree to symlink directory %s dereferenced to %s: %w", originalFilename, filename, err)
+						}
+						symlinkDirFiles, err := FilesFromFS(ctx, subFsys, options, map[string]string{filename: nameInArchive})
+						if err != nil {
+							return fmt.Errorf("getting files from symlink directory %s dereferenced to %s: %w", originalFilename, filename, err)
+						}
+
+						files = append(files, symlinkDirFiles...)
+						return nil
+					}
+				} else {
+					// preserve symlinks
+					linkTarget, err = fs.ReadLink(fsys, filename)
+					if err != nil {
+						return fmt.Errorf("%s: ReadLink: %w", filename, err)
+					}
+				}
 			}
 
 			// handle file attributes
@@ -313,6 +338,11 @@ type FromDiskOptions struct {
 
 // FromFSOptions specifies various options for gathering files from a [fs.FS].
 type FromFSOptions struct {
+	// If true, symbolic links will be dereferenced, meaning that
+	// the link will not be added as a link, but what the link
+	// points to will be added as a file.
+	FollowSymlinks bool
+
 	// If true, some file attributes will not be preserved.
 	// Name, size, type, and permissions will still be preserved.
 	ClearAttributes bool
@@ -444,6 +474,45 @@ func followSymlink(filename string) (string, os.FileInfo, error) {
 			linkPath = filepath.Join(filepath.Dir(filename), linkPath)
 		}
 		info, err := os.Lstat(linkPath)
+		if err != nil {
+			return "", nil, fmt.Errorf("%s: statting dereferenced symlink: %w", filename, err)
+		}
+
+		// Not a symlink, we've found the target, return it
+		if info.Mode()&os.ModeSymlink == 0 {
+			return linkPath, info, nil
+		}
+
+		if visited[linkPath] {
+			return "", nil, fmt.Errorf("%s: symlink loop", filename)
+		}
+
+		if len(visited) >= maxDepth {
+			return "", nil, fmt.Errorf("%s: maximum symlink depth (%d) exceeded", filename, maxDepth)
+		}
+
+		visited[linkPath] = true
+		filename = linkPath
+	}
+}
+
+// followSymlinkFS follows a symlink within the provided FS until it finds
+// a non-symlink, returning the target path, file info, and any error that
+// occurs.
+// It also checks for symlink loops and maximum depth.
+func followSymlinkFS(fsys fs.FS, filename string) (string, os.FileInfo, error) {
+	visited := make(map[string]bool)
+	visited[filename] = true
+	// While not necessarily applicable to every possible [fs.ReadLinkFS]
+	// implementation, this seems like a reasonable limit to impose.
+	const maxDepth = 40
+
+	for {
+		linkPath, err := fs.ReadLink(fsys, filename)
+		if err != nil {
+			return "", nil, fmt.Errorf("%s: ReadLink: %w", filename, err)
+		}
+		info, err := fs.Lstat(fsys, linkPath)
 		if err != nil {
 			return "", nil, fmt.Errorf("%s: statting dereferenced symlink: %w", filename, err)
 		}
