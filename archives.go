@@ -90,7 +90,7 @@ func FilesFromDisk(ctx context.Context, options *FromDiskOptions, filenames map[
 				return err
 			}
 
-			nameInArchive := nameOnDiskToNameInArchive(filename, rootOnDisk, rootInArchive)
+			nameInArchive := nameOnDiskToNameInArchive(filename, rootOnDisk, rootInArchive, filepath.Separator)
 			// this is the root folder and we are adding its contents to target rootInArchive
 			if info.IsDir() && nameInArchive == "" {
 				return nil
@@ -148,17 +148,125 @@ func FilesFromDisk(ctx context.Context, options *FromDiskOptions, filenames map[
 	return files, nil
 }
 
+// FilesFromFS is an opinionated function that returns a list of [FileInfo] by
+// walking the provided [fs.FS] according to the filenames map or the entire
+// [fs.FS] if filenames is set to nil or empty map. The keys are the names on
+// the [fs.FS], and the values become their associated names in the archive.
+//
+// Map keys that specify directories on FS will be walked and added to the
+// archive recursively, rooted at the named directory. They should use
+// slash ('/') as the path separator. For convenience, map keys that end
+// in a slash will enumerate contents only, without adding the folder itself
+// to the archive.
+//
+// Map values should use slash ('/') as the separator. For convenience, map
+// values that are empty string are interpreted as the base name of the file
+// (sans path) in the root of the archive; and map values that end in a slash
+// will use the base name of the file in that folder of the archive.
+//
+// File gathering will adhere to the settings specified in options.
+//
+// This function is used primarily when preparing a list of files to add to
+// an archive.
+func FilesFromFS(ctx context.Context, fsys fs.FS, options *FromFSOptions, filenames map[string]string) ([]FileInfo, error) {
+	var files []FileInfo
+	// if filenames is nil or empty map, default to walking the entire FS as-is
+	if len(filenames) == 0 {
+		filenames = map[string]string{
+			".": "",
+		}
+	}
+	for rootOnFS, rootInArchive := range filenames {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		walkErr := fs.WalkDir(fsys, rootOnFS, func(filename string, d fs.DirEntry, err error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err != nil {
+				return err
+			}
+
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+
+			nameInArchive := nameOnDiskToNameInArchive(filename, rootOnFS, rootInArchive, '/')
+			// this is the root folder and we are adding its contents to target rootInArchive
+			if info.IsDir() && nameInArchive == "" {
+				return nil
+			}
+
+			// handle symbolic links
+			var linkTarget string
+			if isSymlink(info) {
+				if options != nil && options.FollowSymlinks {
+					originalFilename := filename
+					filename, info, err = followSymlinkFS(fsys, filename)
+					if err != nil {
+						return err
+					}
+					if info.IsDir() {
+						subFsys, err := fs.Sub(fsys, filename)
+						if err != nil {
+							return fmt.Errorf("getting subtree to symlink directory %s dereferenced to %s: %w", originalFilename, filename, err)
+						}
+						symlinkDirFiles, err := FilesFromFS(ctx, subFsys, options, map[string]string{filename: nameInArchive})
+						if err != nil {
+							return fmt.Errorf("getting files from symlink directory %s dereferenced to %s: %w", originalFilename, filename, err)
+						}
+
+						files = append(files, symlinkDirFiles...)
+						return nil
+					}
+				} else {
+					// preserve symlinks
+					linkTarget, err = fs.ReadLink(fsys, filename)
+					if err != nil {
+						return fmt.Errorf("%s: ReadLink: %w", filename, err)
+					}
+				}
+			}
+
+			// handle file attributes
+			if options != nil && options.ClearAttributes {
+				info = noAttrFileInfo{info}
+			}
+
+			file := FileInfo{
+				FileInfo:      info,
+				NameInArchive: nameInArchive,
+				LinkTarget:    linkTarget,
+				Open: func() (fs.File, error) {
+					return fsys.Open(filename)
+				},
+			}
+
+			files = append(files, file)
+
+			return nil
+		})
+		if walkErr != nil {
+			return nil, walkErr
+		}
+	}
+
+	return files, nil
+}
+
 // nameOnDiskToNameInArchive converts a filename from disk to a name in an archive,
 // respecting rules defined by FilesFromDisk. nameOnDisk is the full filename on disk
 // which is expected to be prefixed by rootOnDisk (according to fs.WalkDirFunc godoc)
 // and which will be placed into a folder rootInArchive in the archive.
-func nameOnDiskToNameInArchive(nameOnDisk, rootOnDisk, rootInArchive string) string {
+func nameOnDiskToNameInArchive(nameOnDisk, rootOnDisk, rootInArchive string, separator rune) string {
 	// These manipulations of rootInArchive could be done just once instead of on
 	// every walked file since they don't rely on nameOnDisk which is the only
 	// variable that changes during the walk, but combining all the logic into this
 	// one function is easier to reason about and test. I suspect the performance
 	// penalty is insignificant.
-	if strings.HasSuffix(rootOnDisk, string(filepath.Separator)) {
+	if strings.HasSuffix(rootOnDisk, string(separator)) {
 		// "map keys that end in a separator will enumerate contents only,
 		// without adding the folder itself to the archive."
 		rootInArchive = trimTopDir(rootInArchive)
@@ -218,6 +326,18 @@ func (noAttrFileInfo) Sys() any           { return nil }
 
 // FromDiskOptions specifies various options for gathering files from disk.
 type FromDiskOptions struct {
+	// If true, symbolic links will be dereferenced, meaning that
+	// the link will not be added as a link, but what the link
+	// points to will be added as a file.
+	FollowSymlinks bool
+
+	// If true, some file attributes will not be preserved.
+	// Name, size, type, and permissions will still be preserved.
+	ClearAttributes bool
+}
+
+// FromFSOptions specifies various options for gathering files from a [fs.FS].
+type FromFSOptions struct {
 	// If true, symbolic links will be dereferenced, meaning that
 	// the link will not be added as a link, but what the link
 	// points to will be added as a file.
@@ -354,6 +474,45 @@ func followSymlink(filename string) (string, os.FileInfo, error) {
 			linkPath = filepath.Join(filepath.Dir(filename), linkPath)
 		}
 		info, err := os.Lstat(linkPath)
+		if err != nil {
+			return "", nil, fmt.Errorf("%s: statting dereferenced symlink: %w", filename, err)
+		}
+
+		// Not a symlink, we've found the target, return it
+		if info.Mode()&os.ModeSymlink == 0 {
+			return linkPath, info, nil
+		}
+
+		if visited[linkPath] {
+			return "", nil, fmt.Errorf("%s: symlink loop", filename)
+		}
+
+		if len(visited) >= maxDepth {
+			return "", nil, fmt.Errorf("%s: maximum symlink depth (%d) exceeded", filename, maxDepth)
+		}
+
+		visited[linkPath] = true
+		filename = linkPath
+	}
+}
+
+// followSymlinkFS follows a symlink within the provided FS until it finds
+// a non-symlink, returning the target path, file info, and any error that
+// occurs.
+// It also checks for symlink loops and maximum depth.
+func followSymlinkFS(fsys fs.FS, filename string) (string, os.FileInfo, error) {
+	visited := make(map[string]bool)
+	visited[filename] = true
+	// While not necessarily applicable to every possible [fs.ReadLinkFS]
+	// implementation, this seems like a reasonable limit to impose.
+	const maxDepth = 40
+
+	for {
+		linkPath, err := fs.ReadLink(fsys, filename)
+		if err != nil {
+			return "", nil, fmt.Errorf("%s: ReadLink: %w", filename, err)
+		}
+		info, err := fs.Lstat(fsys, linkPath)
 		if err != nil {
 			return "", nil, fmt.Errorf("%s: statting dereferenced symlink: %w", filename, err)
 		}
