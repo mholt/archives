@@ -53,11 +53,11 @@ func (Tar) MediaType() string { return "application/x-tar" }
 func (t Tar) Match(_ context.Context, filename string, stream io.Reader) (MatchResult, error) {
 	var mr MatchResult
 
-    extensions := strings.Split(strings.ToLower(filename), ".")
-    // first item is the file name so drop it
+	extensions := strings.Split(strings.ToLower(filename), ".")
+	// first item is the file name so drop it
 	extensions = extensions[1:]
 
-    // match filename
+	// match filename
 	if slices.Contains(extensions, strings.Trim(t.Extension(), ".")) {
 		mr.ByName = true
 	}
@@ -105,10 +105,27 @@ func (t Tar) writeFileToArchive(ctx context.Context, tw *tar.Writer, file FileIn
 		return err // honor context cancellation
 	}
 
-	hdr, err := tar.FileInfoHeader(file, file.LinkTarget)
-	if err != nil {
-		return fmt.Errorf("file %s: creating header: %w", file.NameInArchive, err)
+	var hdr *tar.Header
+	var err error
+
+	// Handle hardlinks (LinkTarget is set for regular files with multiple hard links)
+	if file.LinkTarget != "" && file.Mode().IsRegular() {
+		// This is a hardlink, not a symlink
+		hdr, err = tar.FileInfoHeader(file, "")
+		if err != nil {
+			return fmt.Errorf("file %s: creating hardlink header: %w", file.NameInArchive, err)
+		}
+		hdr.Typeflag = tar.TypeLink
+		hdr.Linkname = file.LinkTarget
+		hdr.Size = 0 // hardlinks don't store content
+	} else {
+		// Regular file, directory, or symlink
+		hdr, err = tar.FileInfoHeader(file, file.LinkTarget)
+		if err != nil {
+			return fmt.Errorf("file %s: creating header: %w", file.NameInArchive, err)
+		}
 	}
+
 	hdr.Name = file.NameInArchive // complete path, since FileInfoHeader() only has base name
 	if hdr.Name == "" {
 		hdr.Name = file.Name() // assume base name of file I guess
@@ -142,7 +159,7 @@ func (t Tar) writeFileToArchive(ctx context.Context, tw *tar.Writer, file FileIn
 	}
 
 	// only proceed to write a file body if there is actually a body
-	// (for example, directories and links don't have a body)
+	// (for example, directories, links, and hardlinks don't have a body)
 	if hdr.Typeflag != tar.TypeReg {
 		return nil
 	}
