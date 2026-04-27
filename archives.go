@@ -9,7 +9,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -74,11 +73,6 @@ func (f FileInfo) Stat() (fs.FileInfo, error) { return f.FileInfo, nil }
 func FilesFromDisk(ctx context.Context, options *FromDiskOptions, filenames map[string]string) ([]FileInfo, error) {
 	var files []FileInfo
 
-	// Track inodes to detect hardlinks
-	type inodeKey struct {
-		dev uint64
-		ino uint64
-	}
 	inodeMap := make(map[inodeKey]string)
 
 	for rootOnDisk, rootInArchive := range filenames {
@@ -108,18 +102,11 @@ func FilesFromDisk(ctx context.Context, options *FromDiskOptions, filenames map[
 			// handle hardlinks for regular files
 			var linkTarget string
 			if info.Mode().IsRegular() {
-				if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink > 1 {
-					ikey := inodeKey{
-						dev: uint64(stat.Dev),
-						ino: stat.Ino,
-					}
-
-					if firstPath, exists := inodeMap[ikey]; exists {
-						// This is a hardlink to a file we've already seen
+				if key, ok := hardlinkKey(info); ok {
+					if firstPath, exists := inodeMap[key]; exists {
 						linkTarget = firstPath
 					} else {
-						// First occurrence of this inode
-						inodeMap[ikey] = nameInArchive
+						inodeMap[key] = nameInArchive
 					}
 				}
 			}
