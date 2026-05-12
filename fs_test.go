@@ -294,6 +294,50 @@ func TestArchiveFS_ReadDir(t *testing.T) {
 	}
 }
 
+func TestArchiveFS_Sub(t *testing.T) {
+	fsys := &ArchiveFS{
+		Stream: io.NewSectionReader(bytes.NewReader(unorderZip), 0, int64(len(unorderZip))),
+		Format: Zip{},
+	}
+
+	sub, err := fsys.Sub("2")
+	if err != nil {
+		t.Fatalf("Sub(%q): %v", "2", err)
+	}
+
+	// Sub must not mutate the receiver.
+	if fsys.Prefix != "" {
+		t.Errorf("Sub mutated receiver Prefix, got %q want %q", fsys.Prefix, "")
+	}
+
+	got, err := fs.ReadDir(sub, ".")
+	if err != nil {
+		t.Fatalf("ReadDir on sub: %v", err)
+	}
+	names := []string{}
+	for _, e := range got {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	if want := []string{"1"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("ReadDir(sub, .) got %v want %v", names, want)
+	}
+
+	// The original FS must still see the full tree.
+	root, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		t.Fatalf("ReadDir on original: %v", err)
+	}
+	rootNames := []string{}
+	for _, e := range root {
+		rootNames = append(rootNames, e.Name())
+	}
+	sort.Strings(rootNames)
+	if want := []string{"1", "2"}; !reflect.DeepEqual(rootNames, want) {
+		t.Errorf("ReadDir(fsys, .) got %v want %v", rootNames, want)
+	}
+}
+
 func TestFileSystem(t *testing.T) {
 	ctx := context.Background()
 	filename := "testdata/test.zip"
