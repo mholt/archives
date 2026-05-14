@@ -445,7 +445,7 @@ func (f ArchiveFS) Open(name string) (fs.File, error) {
 		// this could result in loading the wrong file (!!) so we append a
 		// path separator to ensure that can't happen: "a/b/c.jpg.json/"
 		// is not prefixed by "a/b/c.jpg/", but it will still match as we
-		// expect: "a/b/c/d/" is is prefixed by "a/b/c/", allowing us to
+		// expect: "a/b/c/d/" is prefixed by "a/b/c/", allowing us to
 		// match descenedent files, and "a/b/c.jpg/" is prefixed by
 		// "a/b/c.jpg/", allowing us to match exact filenames.
 		if !strings.HasPrefix(file.NameInArchive+"/", name+"/") {
