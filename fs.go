@@ -737,10 +737,15 @@ func (f *ArchiveFS) Sub(dir string) (fs.FS, error) {
 	// we indicate a path prefix to be used for all operations;
 	// the reason we don't append to the Path field directly
 	// is because the input might be a stream rather than a
-	// path on disk, and the Prefix field is applied on both
-	result := f
-	result.Prefix = dir
-	return result, nil
+	// path on disk, and the Prefix field is applied on both.
+	//
+	// Take a shallow copy of f so we don't mutate the caller's
+	// ArchiveFS, and join dir onto any existing Prefix so a
+	// chained Sub(a).Sub(b) ends up rooted at a/b rather than
+	// replacing the original prefix.
+	result := *f
+	result.Prefix = path.Join(f.Prefix, dir)
+	return &result, nil
 }
 
 // DeepFS is a fs.FS that represents the real file system, but also has
