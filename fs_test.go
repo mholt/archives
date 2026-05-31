@@ -1,6 +1,7 @@
 package archives
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	_ "embed"
@@ -291,6 +292,61 @@ func TestArchiveFS_ReadDir(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// TestArchiveFS_ReadDir_ImplicitDirsZip guards against regression on #72:
+// ZIPs built without explicit directory entries (the default for `zip -r ...`
+// on most systems) must still expose parent directories through ReadDir.
+func TestArchiveFS_ReadDir_ImplicitDirsZip(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	for _, name := range []string{
+		"index.html",
+		"assets/1.txt",
+		"assets/2.txt",
+		"assets/more/3.txt",
+		"assets/four/4.txt",
+	} {
+		zw, err := w.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := zw.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	fsys := ArchiveFS{
+		Stream: io.NewSectionReader(bytes.NewReader(buf.Bytes()), 0, int64(buf.Len())),
+		Format: Zip{},
+	}
+
+	want := map[string][]string{
+		".":           {"assets", "index.html"},
+		"assets":      {"1.txt", "2.txt", "four", "more"},
+		"assets/more": {"3.txt"},
+		"assets/four": {"4.txt"},
+	}
+	for dir, wantLS := range want {
+		entries, err := fsys.ReadDir(dir)
+		if err != nil {
+			t.Errorf("ReadDir(%q): %v", dir, err)
+			continue
+		}
+		got := []string{}
+		for _, e := range entries {
+			got = append(got, e.Name())
+		}
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, wantLS) {
+			t.Errorf("ReadDir(%q) = %v, want %v", dir, got, wantLS)
+		}
 	}
 }
 
