@@ -63,7 +63,7 @@ func (z SevenZip) Match(_ context.Context, filename string, stream io.Reader) (M
 func (z SevenZip) Extract(ctx context.Context, sourceArchive io.Reader, handleFile FileHandler) error {
 	sra, ok := sourceArchive.(seekReaderAt)
 	if !ok {
-		return fmt.Errorf("input type must be an io.ReaderAt and io.Seeker because of zip format constraints")
+		return fmt.Errorf("input type must be an io.ReaderAt and io.Seeker because of 7z format constraints")
 	}
 
 	size, err := streamSizeBySeeking(sra)
