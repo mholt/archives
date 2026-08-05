@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	fastxz "github.com/mikelolasagasti/xz"
-	"github.com/ulikunitz/xz"
+	"github.com/unxed/xz"
 )
 
 func init() {
@@ -44,11 +44,33 @@ func (Xz) OpenWriter(w io.Writer) (io.WriteCloser, error) {
 }
 
 func (Xz) OpenReader(r io.Reader) (io.ReadCloser, error) {
+	// Try parallel decompression if the input is seekable
+	if sra, ok := r.(seekReaderAt); ok {
+		currentOffset, err := sra.Seek(0, io.SeekCurrent)
+		if err == nil {
+			size, err := streamSizeBySeeking(sra)
+			if err == nil {
+				var rAt io.ReaderAt = sra
+				streamSize := size
+				if currentOffset > 0 {
+					rAt = io.NewSectionReader(sra, currentOffset, size-currentOffset)
+					streamSize = size - currentOffset
+				}
+				// Use the parallel reader from github.com/unxed/xz
+				config := xz.ReaderConfig{}
+				if pr, err := config.NewParallelReader(rAt, streamSize); err == nil {
+					return pr, nil
+				}
+			}
+		}
+	}
+
+	// Fallback to sequential decompression
 	xr, err := fastxz.NewReader(r, 0)
 	if err != nil {
 		return nil, err
 	}
-	return io.NopCloser(xr), err
+	return io.NopCloser(xr), nil
 }
 
 // magic number at the beginning of xz files; see section 2.1.1.1

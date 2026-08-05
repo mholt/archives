@@ -19,7 +19,7 @@ require (
 	github.com/minio/minlz v1.1.1
 	github.com/pierrec/lz4/v4 v4.1.26
 	github.com/sorairolake/lzip-go v0.3.8
-	github.com/ulikunitz/xz v0.5.15
+	github.com/unxed/xz v0.1.8
 	golang.org/x/text v0.37.0
 )
 
@@ -29,5 +29,6 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/stangelandcl/ppmd v0.1.0 // indirect
+	github.com/ulikunitz/xz v0.5.15 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 )
