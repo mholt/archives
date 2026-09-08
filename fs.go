@@ -1065,8 +1065,11 @@ func (dirFile) Close() error                  { return nil }
 
 // ReadDir implements [fs.ReadDirFile].
 func (df *dirFile) ReadDir(n int) ([]fs.DirEntry, error) {
+	// n <= 0 returns the entries not yet read, so a second call yields none
 	if n <= 0 {
-		return df.entries, nil
+		entries := df.entries[df.entriesRead:]
+		df.entriesRead = len(df.entries)
+		return entries, nil
 	}
 	if df.entriesRead >= len(df.entries) {
 		return nil, io.EOF

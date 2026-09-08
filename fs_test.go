@@ -1,6 +1,7 @@
 package archives
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	_ "embed"
@@ -15,6 +16,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"testing/fstest"
 )
 
 func TestPathWithoutTopDir(t *testing.T) {
@@ -403,4 +405,38 @@ func TestFileSystem(t *testing.T) {
 		}
 		checkFS(t, fsys)
 	})
+}
+
+func TestArchiveFSConformance(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, e := range []struct{ name, body string }{
+		{"hello.txt", "hi"},
+		{"sub/", ""},
+		{"sub/a.txt", "A"},
+		{"sub/b.txt", "B"},
+		{"sub/deep/", ""},
+		{"sub/deep/c.md", "C"},
+	} {
+		w, err := zw.Create(e.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(e.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A stream keeps the archive in memory; a temp file would still be open at
+	// cleanup time and Windows cannot remove it.
+	fsys := &ArchiveFS{
+		Stream: io.NewSectionReader(bytes.NewReader(buf.Bytes()), 0, int64(buf.Len())),
+		Format: Zip{},
+	}
+	if err := fstest.TestFS(fsys, "hello.txt", "sub/a.txt", "sub/deep/c.md"); err != nil {
+		t.Error(err)
+	}
 }
