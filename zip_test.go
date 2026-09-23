@@ -1,7 +1,10 @@
 package archives_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"testing"
+	"testing/fstest"
 
 	"github.com/mholt/archives"
 )
@@ -279,5 +283,81 @@ func verifyIsDirectory(t *testing.T, baseDir, relativePath string) {
 	}
 	if !stat.IsDir() {
 		t.Errorf("expected %s to be a directory, got mode %s", relativePath, stat.Mode())
+	}
+}
+
+func TestZip_RoundTripCompressionMethods(t *testing.T) {
+	incompressible := make([]byte, 64<<10)
+	rand.Read(incompressible)
+	contents := map[string][]byte{
+		"hello.txt":            []byte("hello, world"),
+		"empty.txt":            {},
+		"dir/compressible.txt": bytes.Repeat([]byte("hello, world\n"), 1<<14),
+		"dir/random.bin":       incompressible,
+	}
+	fsys := fstest.MapFS{}
+	filenames := map[string]string{}
+	for name, data := range contents {
+		fsys[name] = &fstest.MapFile{Data: data, Mode: 0o644}
+		filenames[name] = name
+	}
+
+	ctx := context.Background()
+	files, err := archives.FilesFromFS(ctx, fsys, nil, filenames)
+	if err != nil {
+		t.Fatalf("failed to get files: %v", err)
+	}
+
+	methods := []struct {
+		name   string
+		method uint16
+	}{
+		{"Store", zip.Store},
+		{"Deflate", zip.Deflate},
+		{"Bzip2", archives.ZipMethodBzip2},
+		{"Zstd", archives.ZipMethodZstd},
+		{"Xz", archives.ZipMethodXz},
+	}
+	for _, m := range methods {
+		t.Run(m.name, func(t *testing.T) {
+			z := archives.Zip{Compression: m.method}
+			var buf bytes.Buffer
+			if err := z.Archive(ctx, &buf, files); err != nil {
+				t.Fatalf("failed to archive files: %v", err)
+			}
+
+			// the standard library must be able to read the archive's structure too
+			zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+			if err != nil {
+				t.Fatalf("archive/zip failed to read archive: %v", err)
+			}
+			for _, f := range zr.File {
+				if _, err := f.OpenRaw(); err != nil {
+					t.Errorf("archive/zip failed to open %s: %v", f.Name, err)
+				}
+			}
+
+			extracted := map[string][]byte{}
+			err = z.Extract(ctx, bytes.NewReader(buf.Bytes()), func(ctx context.Context, file archives.FileInfo) error {
+				rc, err := file.Open()
+				if err != nil {
+					return err
+				}
+				defer rc.Close()
+				extracted[file.NameInArchive], err = io.ReadAll(rc)
+				return err
+			})
+			if err != nil {
+				t.Fatalf("failed to extract archive: %v", err)
+			}
+			if len(extracted) != len(contents) {
+				t.Errorf("expected %d files to be extracted, got %d", len(contents), len(extracted))
+			}
+			for name, want := range contents {
+				if got := extracted[name]; !bytes.Equal(got, want) {
+					t.Errorf("expected %s to extract to the %d bytes archived, got %d bytes that differ", name, len(want), len(got))
+				}
+			}
+		})
 	}
 }
