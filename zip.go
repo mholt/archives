@@ -33,7 +33,7 @@ func init() {
 		return zstd.NewWriter(out)
 	})
 	zip.RegisterCompressor(ZipMethodXz, func(out io.Writer) (io.WriteCloser, error) {
-		return xz.NewWriter(out)
+		return &xzZipWriter{out: out}, nil
 	})
 
 	zip.RegisterDecompressor(ZipMethodBzip2, func(r io.Reader) io.ReadCloser {
@@ -373,6 +373,41 @@ func (z Zip) Insert(ctx context.Context, into io.ReadWriteSeeker, files []FileIn
 type seekReaderAt interface {
 	io.ReaderAt
 	io.Seeker
+}
+
+// xzZipWriter creates its xz writer on first use. xz.NewWriter writes the
+// stream header right away, but zip.Writer creates the compressor before it
+// writes the file's local header, which would put the xz header before it.
+type xzZipWriter struct {
+	out io.Writer
+	xw  *xz.Writer
+	err error
+}
+
+// writer keeps the first error, so a failed start is not retried with a
+// second stream header.
+func (w *xzZipWriter) writer() (*xz.Writer, error) {
+	if w.xw == nil && w.err == nil {
+		w.xw, w.err = xz.NewWriter(w.out)
+	}
+	return w.xw, w.err
+}
+
+func (w *xzZipWriter) Write(p []byte) (int, error) {
+	xw, err := w.writer()
+	if err != nil {
+		return 0, err
+	}
+	return xw.Write(p)
+}
+
+// Close writes a complete xz stream even if nothing was written.
+func (w *xzZipWriter) Close() error {
+	xw, err := w.writer()
+	if err != nil {
+		return err
+	}
+	return xw.Close()
 }
 
 // Additional compression methods not offered by archive/zip.
