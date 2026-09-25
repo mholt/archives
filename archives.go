@@ -130,7 +130,7 @@ func FilesFromDisk(ctx context.Context, options *FromDiskOptions, filenames map[
 					}
 				} else {
 					// preserve symlinks
-					linkTarget, err = os.Readlink(filename)
+					linkTarget, err = os.Readlink(fixOSPath(filename))
 					if err != nil {
 						return fmt.Errorf("%s: readlink: %w", filename, err)
 					}
@@ -147,7 +147,7 @@ func FilesFromDisk(ctx context.Context, options *FromDiskOptions, filenames map[
 				NameInArchive: nameInArchive,
 				LinkTarget:    linkTarget,
 				Open: func() (fs.File, error) {
-					return os.Open(filename)
+					return os.Open(fixOSPath(filename))
 				},
 			}
 
@@ -480,14 +480,14 @@ func followSymlink(filename string) (string, os.FileInfo, error) {
 	const maxDepth = 40
 
 	for {
-		linkPath, err := os.Readlink(filename)
+		linkPath, err := os.Readlink(fixOSPath(filename))
 		if err != nil {
 			return "", nil, fmt.Errorf("%s: readlink: %w", filename, err)
 		}
 		if !filepath.IsAbs(linkPath) {
 			linkPath = filepath.Join(filepath.Dir(filename), linkPath)
 		}
-		info, err := os.Lstat(linkPath)
+		info, err := os.Lstat(fixOSPath(linkPath))
 		if err != nil {
 			return "", nil, fmt.Errorf("%s: statting dereferenced symlink: %w", filename, err)
 		}
