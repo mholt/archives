@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -375,6 +376,15 @@ type FromFSOptions struct {
 // Any other returned error will terminate a walk and be returned to the caller.
 type FileHandler func(ctx context.Context, info FileInfo) error
 
+// copyBufPool holds buffers for openAndCopyFile, so that archiving many
+// files does not allocate a new copy buffer for every file.
+var copyBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 128*1024)
+		return &b
+	},
+}
+
 // openAndCopyFile opens file for reading, copies its
 // contents to w, then closes file.
 func openAndCopyFile(file FileInfo, w io.Writer) error {
@@ -383,10 +393,14 @@ func openAndCopyFile(file FileInfo, w io.Writer) error {
 		return err
 	}
 	defer fileReader.Close()
+
+	bufp := copyBufPool.Get().(*[]byte)
+	defer copyBufPool.Put(bufp)
+
 	// When file is in use and size is being written to, creating the compressed
-	// file will fail with "archive/tar: write too long." Using CopyN gracefully
-	// handles this.
-	_, err = io.CopyN(w, fileReader, file.Size())
+	// file will fail with "archive/tar: write too long." Copying at most
+	// file.Size() bytes (like io.CopyN does) gracefully handles this.
+	_, err = io.CopyBuffer(w, io.LimitReader(fileReader, file.Size()), *bufp)
 	if err != nil && err != io.EOF {
 		return err
 	}
