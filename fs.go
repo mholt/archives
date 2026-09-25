@@ -110,7 +110,11 @@ func FileSystem(ctx context.Context, filename string, stream ReaderAtSeeker) (fs
 		return &ArchiveFS{Stream: sr, Format: fileFormat, Context: ctx}, nil
 
 	case Compression:
-		return FileFS{Path: filename, Compression: fileFormat}, nil
+		return FileFS{
+			Path:        filename,
+			Compression: fileFormat,
+			Name:        logicalCompressedName(filepath.Base(filename), fileFormat.Extension()),
+		}, nil
 	}
 
 	return nil, fmt.Errorf("unable to create file system rooted at %s due to unsupported file or folder type", filename)
@@ -127,13 +131,19 @@ type ReaderAtSeeker interface {
 // FileFS allows accessing a file on disk using a consistent file system interface.
 // The value should be the path to a regular file, not a directory. This file will
 // be the only entry in the file system and will be at its root. It can be accessed
-// within the file system by the name of "." or the filename.
+// within the file system by the name of "." or the filename. For a compressed
+// regular file, the compression suffix is removed from the logical entry name.
 //
 // If the file is compressed, set the Compression field so that reads from the
 // file will be transparently decompressed.
 type FileFS struct {
 	// The path to the file on disk.
 	Path string
+
+	// The logical name exposed at the root of the file system. If empty, the
+	// physical basename is used, with a compression suffix removed when the
+	// decompressor also exposes an Extension method.
+	Name string
 
 	// If file is compressed, setting this field will
 	// transparently decompress reads.
@@ -164,7 +174,22 @@ func (f FileFS) Stat(name string) (fs.FileInfo, error) {
 	if err := f.checkName(name, "stat"); err != nil {
 		return nil, err
 	}
-	return os.Stat(f.Path)
+	info, err := os.Stat(f.Path)
+	if err != nil {
+		return nil, err
+	}
+	if f.Compression == nil {
+		return info, nil
+	}
+
+	// FileFS represents the decompressed view of a compressed regular file.
+	// Obtain the logical size as well as the logical name so callers such as
+	// fs.ReadDir report the same file that Open() actually returns.
+	size, err := f.uncompressedSize()
+	if err != nil {
+		return nil, err
+	}
+	return logicalFileInfo{FileInfo: info, name: f.logicalName(), size: size}, nil
 }
 
 // ReadDir returns a directory listing with the file as the singular entry.
@@ -181,7 +206,7 @@ func (f FileFS) ReadDir(name string) ([]fs.DirEntry, error) {
 
 // checkName ensures the name is a valid path and also, in the case of
 // the FileFS, that it is either ".", the filename originally passed in
-// to create the FileFS, or the base of the filename (name without path).
+// to create the FileFS, the physical basename, or the logical basename.
 // Other names do not make sense for a FileFS since the FS is only 1 file.
 func (f FileFS) checkName(name, op string) error {
 	if name == f.Path {
@@ -190,10 +215,68 @@ func (f FileFS) checkName(name, op string) error {
 	if !fs.ValidPath(name) {
 		return &fs.PathError{Op: op, Path: name, Err: fs.ErrInvalid}
 	}
-	if name != "." && name != filepath.Base(f.Path) {
+	if name != "." && name != filepath.Base(f.Path) && name != f.logicalName() {
 		return &fs.PathError{Op: op, Path: name, Err: fs.ErrNotExist}
 	}
 	return nil
+}
+
+// logicalName is the name of the single entry exposed by FileFS. Compressed
+// regular files are presented as their decompressed filename, while ordinary
+// files retain their physical basename.
+func (f FileFS) logicalName() string {
+	if f.Name != "" {
+		return f.Name
+	}
+	name := filepath.Base(f.Path)
+	if f.Compression == nil {
+		return name
+	}
+	extensionProvider, ok := f.Compression.(interface{ Extension() string })
+	if !ok {
+		return name
+	}
+	return logicalCompressedName(name, extensionProvider.Extension())
+}
+
+func logicalCompressedName(name, extension string) string {
+	if extension == "" || len(name) <= len(extension) || !strings.EqualFold(name[len(name)-len(extension):], extension) {
+		return name
+	}
+	logical := name[:len(name)-len(extension)]
+	if logical == "" || logical == "." {
+		return name
+	}
+	return logical
+}
+
+// uncompressedSize returns the size of the logical file exposed by FileFS.
+// Compression formats do not share a portable metadata API for this value, so
+// the decompressed stream is counted. This is only needed for FileInfo/DirEntry
+// metadata; Open still streams the data normally.
+func (f FileFS) uncompressedSize() (int64, error) {
+	file, err := os.Open(f.Path)
+	if err != nil {
+		return 0, err
+	}
+	r, err := f.Compression.OpenReader(file)
+	if err != nil {
+		_ = file.Close()
+		return 0, err
+	}
+	size, readErr := io.Copy(io.Discard, r)
+	closeReaderErr := r.Close()
+	closeFileErr := file.Close()
+	if readErr != nil {
+		return 0, readErr
+	}
+	if closeReaderErr != nil {
+		return 0, closeReaderErr
+	}
+	if closeFileErr != nil {
+		return 0, closeFileErr
+	}
+	return size, nil
 }
 
 // compressedFile is an fs.File that specially reads
@@ -203,6 +286,17 @@ type compressedFile struct {
 	io.Reader // decompressor
 	closeBoth // file and decompressor
 }
+
+// logicalFileInfo preserves the physical file metadata while presenting the
+// name and size of the decompressed file.
+type logicalFileInfo struct {
+	fs.FileInfo
+	name string
+	size int64
+}
+
+func (info logicalFileInfo) Name() string { return info.name }
+func (info logicalFileInfo) Size() int64  { return info.size }
 
 // DirFS is similar to os.dirFS (obtained via os.DirFS()), but it is
 // exported so it can be used with type assertions. It also returns

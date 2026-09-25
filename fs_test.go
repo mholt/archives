@@ -2,6 +2,7 @@ package archives
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	_ "embed"
 	"fmt"
@@ -403,4 +404,63 @@ func TestFileSystem(t *testing.T) {
 		}
 		checkFS(t, fsys)
 	})
+}
+
+func TestFileSystemCompressedRegularFile(t *testing.T) {
+	payload := []byte("Start-Date: 2026-08-23  10:00:00\nCommandline: apt install f4\n")
+	filename := filepath.Join(t.TempDir(), "history.log.1.gz")
+
+	file, err := os.Create(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := gzip.NewWriter(file)
+	if _, err := writer.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	fsys, err := FileSystem(context.Background(), filename, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ReadDir returned %d entries, want one", len(entries))
+	}
+	if got, want := entries[0].Name(), "history.log.1"; got != want {
+		t.Fatalf("entry name = %q, want %q", got, want)
+	}
+	info, err := entries[0].Info()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := info.Size(), int64(len(payload)); got != want {
+		t.Fatalf("entry size = %d, want decompressed size %d", got, want)
+	}
+
+	opened, err := fsys.Open("history.log.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(opened)
+	closeErr := opened.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("decompressed payload mismatch: got %d bytes, want %d", len(got), len(payload))
+	}
 }
