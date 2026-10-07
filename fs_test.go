@@ -1,6 +1,8 @@
 package archives
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"context"
 	_ "embed"
@@ -403,4 +405,60 @@ func TestFileSystem(t *testing.T) {
 		}
 		checkFS(t, fsys)
 	})
+}
+
+func TestArchiveFS_ReadDirParentEntry(t *testing.T) {
+	for _, format := range []string{"tar", "zip"} {
+		for _, name := range []string{"..", "../", "dir/../.."} {
+			t.Run(format+"/"+name, func(t *testing.T) {
+				var buf bytes.Buffer
+				if format == "tar" {
+					w := tar.NewWriter(&buf)
+					for _, entry := range []string{name, "ok.txt"} {
+						if err := w.WriteHeader(&tar.Header{Name: entry, Mode: 0o644}); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := w.Close(); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					w := zip.NewWriter(&buf)
+					for _, entry := range []string{name, "ok.txt"} {
+						if _, err := w.Create(entry); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := w.Close(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				var extractor Extractor = Tar{}
+				if format == "zip" {
+					extractor = Zip{}
+				}
+				fsys := &ArchiveFS{
+					Stream: io.NewSectionReader(bytes.NewReader(buf.Bytes()), 0, int64(buf.Len())),
+					Format: extractor,
+				}
+				entries, err := fsys.ReadDir(".")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(entries) != 1 || entries[0].Name() != "ok.txt" {
+					t.Errorf("ReadDir returned %v, want only ok.txt", entries)
+				}
+				var walked []string
+				if err := fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
+					walked = append(walked, name)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(walked, []string{".", "ok.txt"}) {
+					t.Errorf("WalkDir visited %v, want [ . ok.txt ]", walked)
+				}
+			})
+		}
+	}
 }
