@@ -635,7 +635,8 @@ func (f *ArchiveFS) ReadDir(name string) ([]fs.DirEntry, error) {
 
 		// avoid infinite walk; apparently, creating a tar file in the target
 		// directory may result in an entry called "." in the archive; see #384
-		if file.NameInArchive == "." {
+		// A parent entry is not a valid FS path and must not appear in directory listings.
+		if file.NameInArchive == "." || file.NameInArchive == ".." {
 			return nil
 		}
 
