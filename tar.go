@@ -29,6 +29,10 @@ type Tar struct {
 	// If true, preserve only numeric user and group id
 	NumericUIDGID bool
 
+	// If true, skip preserving user and group id ownership
+	// when creating or extracting an archive.
+	SkipUIDGID bool
+
 	// If true, errors encountered during reading or writing
 	// a file within an archive will be logged and the
 	// operation will continue on remaining files.
@@ -137,22 +141,7 @@ func (t Tar) writeFileToArchive(ctx context.Context, tw *tar.Writer, file FileIn
 	if t.Format != 0 {
 		hdr.Format = t.Format
 	}
-	if t.NumericUIDGID {
-		hdr.Uname = ""
-		hdr.Gname = ""
-	}
-	if t.Uid != 0 {
-		hdr.Uid = t.Uid
-	}
-	if t.Gid != 0 {
-		hdr.Gid = t.Gid
-	}
-	if t.Uname != "" {
-		hdr.Uname = t.Uname
-	}
-	if t.Gname != "" {
-		hdr.Gname = t.Gname
-	}
+	t.applyOwnership(hdr)
 
 	if err := tw.WriteHeader(hdr); err != nil {
 		return fmt.Errorf("file %s: writing header: %w", file.NameInArchive, err)
@@ -271,6 +260,8 @@ func (t Tar) Extract(ctx context.Context, sourceArchive io.Reader, handleFile Fi
 			continue
 		}
 
+		t.applyOwnership(hdr)
+
 		info := hdr.FileInfo()
 		file := FileInfo{
 			FileInfo:      info,
@@ -299,6 +290,53 @@ func (t Tar) Extract(ctx context.Context, sourceArchive io.Reader, handleFile Fi
 	}
 
 	return nil
+}
+
+func (t Tar) applyOwnership(hdr *tar.Header) {
+	if t.SkipUIDGID {
+		hdr.Uid = 0
+		hdr.Gid = 0
+		hdr.Uname = ""
+		hdr.Gname = ""
+		if hdr.PAXRecords != nil {
+			delete(hdr.PAXRecords, "uid")
+			delete(hdr.PAXRecords, "gid")
+			delete(hdr.PAXRecords, "uname")
+			delete(hdr.PAXRecords, "gname")
+		}
+	}
+	if t.NumericUIDGID {
+		hdr.Uname = ""
+		hdr.Gname = ""
+		if hdr.PAXRecords != nil {
+			delete(hdr.PAXRecords, "uname")
+			delete(hdr.PAXRecords, "gname")
+		}
+	}
+	if t.Uid != 0 {
+		hdr.Uid = t.Uid
+		if hdr.PAXRecords != nil {
+			delete(hdr.PAXRecords, "uid")
+		}
+	}
+	if t.Gid != 0 {
+		hdr.Gid = t.Gid
+		if hdr.PAXRecords != nil {
+			delete(hdr.PAXRecords, "gid")
+		}
+	}
+	if t.Uname != "" {
+		hdr.Uname = t.Uname
+		if hdr.PAXRecords != nil {
+			delete(hdr.PAXRecords, "uname")
+		}
+	}
+	if t.Gname != "" {
+		hdr.Gname = t.Gname
+		if hdr.PAXRecords != nil {
+			delete(hdr.PAXRecords, "gname")
+		}
+	}
 }
 
 // Interface guards
