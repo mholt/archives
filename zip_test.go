@@ -1,15 +1,19 @@
 package archives_test
 
 import (
+	stdzip "archive/zip"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
 	"testing"
+	"testing/fstest"
 
 	"github.com/mholt/archives"
 )
@@ -281,3 +285,249 @@ func verifyIsDirectory(t *testing.T, baseDir, relativePath string) {
 		t.Errorf("expected %s to be a directory, got mode %s", relativePath, stat.Mode())
 	}
 }
+
+func TestZip_ZipMethodXz(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("single file round trip and format validation", func(t *testing.T) {
+		fsys := fstest.MapFS{"hello.txt": {Data: []byte("hello, world")}}
+		info, err := fs.Stat(fsys, "hello.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		files := []archives.FileInfo{{
+			FileInfo:      info,
+			NameInArchive: "hello.txt",
+			Open:          func() (fs.File, error) { return fsys.Open("hello.txt") },
+		}}
+
+		z := archives.Zip{Compression: archives.ZipMethodXz}
+		var buf bytes.Buffer
+		if err := z.Archive(ctx, &buf, files); err != nil {
+			t.Fatalf("Archive failed: %v", err)
+		}
+
+		// Verify zip header magic bytes: must start with PK\x03\x04, not XZ stream header 0xfd7zXZ
+		if buf.Len() < 4 || !bytes.Equal(buf.Bytes()[:4], []byte("PK\x03\x04")) {
+			t.Fatalf("expected zip signature PK\\x03\\x04, got %x", buf.Bytes()[:min(4, buf.Len())])
+		}
+
+		// Verify standard library zip reader can read raw entry without format error
+		zr, err := stdzip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatalf("archive/zip NewReader failed: %v", err)
+		}
+		if len(zr.File) != 1 {
+			t.Fatalf("expected 1 file in zip, got %d", len(zr.File))
+		}
+		rcRaw, err := zr.File[0].OpenRaw()
+		if err != nil {
+			t.Fatalf("archive/zip OpenRaw failed: %v", err)
+		}
+		if _, err := io.ReadAll(rcRaw); err != nil {
+			t.Fatalf("reading raw bytes failed: %v", err)
+		}
+
+		// Verify round-trip extraction
+		var extracted []byte
+		err = z.Extract(ctx, bytes.NewReader(buf.Bytes()), func(ctx context.Context, f archives.FileInfo) error {
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			defer rc.Close()
+			extracted, err = io.ReadAll(rc)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("Extract failed: %v", err)
+		}
+		if string(extracted) != "hello, world" {
+			t.Fatalf("expected 'hello, world', got %q", string(extracted))
+		}
+	})
+
+	t.Run("empty file round trip", func(t *testing.T) {
+		fsys := fstest.MapFS{"empty.txt": {Data: []byte{}}}
+		info, err := fs.Stat(fsys, "empty.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		files := []archives.FileInfo{{
+			FileInfo:      info,
+			NameInArchive: "empty.txt",
+			Open:          func() (fs.File, error) { return fsys.Open("empty.txt") },
+		}}
+
+		z := archives.Zip{Compression: archives.ZipMethodXz}
+		var buf bytes.Buffer
+		if err := z.Archive(ctx, &buf, files); err != nil {
+			t.Fatalf("Archive failed: %v", err)
+		}
+
+		var extracted []byte
+		var fileFound bool
+		err = z.Extract(ctx, bytes.NewReader(buf.Bytes()), func(ctx context.Context, f archives.FileInfo) error {
+			fileFound = true
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			defer rc.Close()
+			extracted, err = io.ReadAll(rc)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("Extract failed: %v", err)
+		}
+		if !fileFound {
+			t.Fatal("expected file to be extracted")
+		}
+		if len(extracted) != 0 {
+			t.Fatalf("expected empty content, got %d bytes", len(extracted))
+		}
+	})
+
+	t.Run("multiple files and directories round trip", func(t *testing.T) {
+		largeContent := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz0123456789\n"), 500)
+		fsys := fstest.MapFS{
+			"dir":           {Mode: fs.ModeDir | 0755},
+			"dir/file1.txt": {Data: []byte("first content")},
+			"dir/empty.txt": {Data: []byte{}},
+			"dir/large.txt": {Data: largeContent},
+			"root.txt":      {Data: []byte("root file content")},
+		}
+
+		fileNames := []string{"dir", "dir/file1.txt", "dir/empty.txt", "dir/large.txt", "root.txt"}
+		var files []archives.FileInfo
+		for _, name := range fileNames {
+			entryName := name
+			info, err := fs.Stat(fsys, entryName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			files = append(files, archives.FileInfo{
+				FileInfo:      info,
+				NameInArchive: entryName,
+				Open: func() (fs.File, error) {
+					return fsys.Open(entryName)
+				},
+			})
+		}
+
+		z := archives.Zip{Compression: archives.ZipMethodXz}
+		var buf bytes.Buffer
+		if err := z.Archive(ctx, &buf, files); err != nil {
+			t.Fatalf("Archive failed: %v", err)
+		}
+
+		extractedMap := make(map[string][]byte)
+		err := z.Extract(ctx, bytes.NewReader(buf.Bytes()), func(ctx context.Context, f archives.FileInfo) error {
+			if f.IsDir() {
+				return nil
+			}
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			defer rc.Close()
+			data, err := io.ReadAll(rc)
+			if err != nil {
+				return err
+			}
+			extractedMap[f.NameInArchive] = data
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Extract failed: %v", err)
+		}
+
+		if string(extractedMap["dir/file1.txt"]) != "first content" {
+			t.Errorf("mismatch in dir/file1.txt: got %q", string(extractedMap["dir/file1.txt"]))
+		}
+		if len(extractedMap["dir/empty.txt"]) != 0 {
+			t.Errorf("expected dir/empty.txt to be empty, got %d bytes", len(extractedMap["dir/empty.txt"]))
+		}
+		if !bytes.Equal(extractedMap["dir/large.txt"], largeContent) {
+			t.Errorf("mismatch in dir/large.txt length: got %d, expected %d", len(extractedMap["dir/large.txt"]), len(largeContent))
+		}
+		if string(extractedMap["root.txt"]) != "root file content" {
+			t.Errorf("mismatch in root.txt: got %q", string(extractedMap["root.txt"]))
+		}
+	})
+
+	t.Run("insert into existing archive with ZipMethodXz", func(t *testing.T) {
+		fsys := fstest.MapFS{"file1.txt": {Data: []byte("initial content")}}
+		info, err := fs.Stat(fsys, "file1.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		initialFiles := []archives.FileInfo{{
+			FileInfo:      info,
+			NameInArchive: "file1.txt",
+			Open:          func() (fs.File, error) { return fsys.Open("file1.txt") },
+		}}
+
+		z := archives.Zip{Compression: archives.ZipMethodXz}
+		var buf bytes.Buffer
+		if err := z.Archive(ctx, &buf, initialFiles); err != nil {
+			t.Fatalf("Archive failed: %v", err)
+		}
+
+		tempFile, err := os.CreateTemp("", "zip_insert_test_*.zip")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(tempFile.Name())
+		defer tempFile.Close()
+
+		if _, err := tempFile.Write(buf.Bytes()); err != nil {
+			t.Fatal(err)
+		}
+
+		insertFsys := fstest.MapFS{"file2.txt": {Data: []byte("inserted content")}}
+		insertInfo, err := fs.Stat(insertFsys, "file2.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		insertFiles := []archives.FileInfo{{
+			FileInfo:      insertInfo,
+			NameInArchive: "file2.txt",
+			Open:          func() (fs.File, error) { return insertFsys.Open("file2.txt") },
+		}}
+
+		if err := z.Insert(ctx, tempFile, insertFiles); err != nil {
+			t.Fatalf("Insert failed: %v", err)
+		}
+
+		if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+			t.Fatal(err)
+		}
+
+		extractedMap := make(map[string][]byte)
+		err = z.Extract(ctx, tempFile, func(ctx context.Context, f archives.FileInfo) error {
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			defer rc.Close()
+			data, err := io.ReadAll(rc)
+			if err != nil {
+				return err
+			}
+			extractedMap[f.NameInArchive] = data
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Extract after insert failed: %v", err)
+		}
+
+		if string(extractedMap["file1.txt"]) != "initial content" {
+			t.Errorf("mismatch in file1.txt: got %q", string(extractedMap["file1.txt"]))
+		}
+		if string(extractedMap["file2.txt"]) != "inserted content" {
+			t.Errorf("mismatch in file2.txt: got %q", string(extractedMap["file2.txt"]))
+		}
+	})
+}
+
