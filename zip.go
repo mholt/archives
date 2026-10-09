@@ -33,27 +33,59 @@ func init() {
 		return zstd.NewWriter(out)
 	})
 	zip.RegisterCompressor(ZipMethodXz, func(out io.Writer) (io.WriteCloser, error) {
-		return xz.NewWriter(out)
+		return newDelayedXZWriter(out)
 	})
 
 	zip.RegisterDecompressor(ZipMethodBzip2, func(r io.Reader) io.ReadCloser {
 		bz2r, err := bzip2.NewReader(r, nil)
 		if err != nil {
-			return nil
+			return errReadCloser{err}
 		}
 		return bz2r
 	})
 	zip.RegisterDecompressor(ZipMethodZstd, func(r io.Reader) io.ReadCloser {
 		zr, err := zstd.NewReader(r)
 		if err != nil {
-			return nil
+			return errReadCloser{err}
 		}
 		return zr.IOReadCloser()
 	})
 	zip.RegisterDecompressor(ZipMethodXz, func(r io.Reader) io.ReadCloser {
 		xr, err := xz.NewReader(r)
 		if err != nil {
-			return nil
+			return errReadCloser{err}
+		}
+		return io.NopCloser(xr)
+	})
+
+	szip.RegisterCompressor(ZipMethodBzip2, func(out io.Writer) (io.WriteCloser, error) {
+		return bzip2.NewWriter(out, &bzip2.WriterConfig{})
+	})
+	szip.RegisterCompressor(ZipMethodZstd, func(out io.Writer) (io.WriteCloser, error) {
+		return zstd.NewWriter(out)
+	})
+	szip.RegisterCompressor(ZipMethodXz, func(out io.Writer) (io.WriteCloser, error) {
+		return newDelayedXZWriter(out)
+	})
+
+	szip.RegisterDecompressor(ZipMethodBzip2, func(r io.Reader) io.ReadCloser {
+		bz2r, err := bzip2.NewReader(r, nil)
+		if err != nil {
+			return errReadCloser{err}
+		}
+		return bz2r
+	})
+	szip.RegisterDecompressor(ZipMethodZstd, func(r io.Reader) io.ReadCloser {
+		zr, err := zstd.NewReader(r)
+		if err != nil {
+			return errReadCloser{err}
+		}
+		return zr.IOReadCloser()
+	})
+	szip.RegisterDecompressor(ZipMethodXz, func(r io.Reader) io.ReadCloser {
+		xr, err := xz.NewReader(r)
+		if err != nil {
+			return errReadCloser{err}
 		}
 		return io.NopCloser(xr)
 	})
@@ -210,6 +242,28 @@ func (z Zip) Extract(ctx context.Context, sourceArchive io.Reader, handleFile Fi
 	if err != nil {
 		return err
 	}
+
+	zr.RegisterDecompressor(ZipMethodBzip2, func(r io.Reader) io.ReadCloser {
+		bz2r, err := bzip2.NewReader(r, nil)
+		if err != nil {
+			return errReadCloser{err}
+		}
+		return bz2r
+	})
+	zr.RegisterDecompressor(ZipMethodZstd, func(r io.Reader) io.ReadCloser {
+		zr, err := zstd.NewReader(r)
+		if err != nil {
+			return errReadCloser{err}
+		}
+		return zr.IOReadCloser()
+	})
+	zr.RegisterDecompressor(ZipMethodXz, func(r io.Reader) io.ReadCloser {
+		xr, err := xz.NewReader(r)
+		if err != nil {
+			return errReadCloser{err}
+		}
+		return io.NopCloser(xr)
+	})
 
 	// important to initialize to non-nil, empty value due to how fileIsIncluded works
 	skipDirs := skipList{}
@@ -435,3 +489,70 @@ var (
 	_ ArchiverAsync = Zip{}
 	_ Extractor     = Zip{}
 )
+
+type errReadCloser struct {
+	err error
+}
+
+func (e errReadCloser) Read([]byte) (int, error) { return 0, e.err }
+func (e errReadCloser) Close() error             { return e.err }
+
+// delayedXZWriter wraps xz.Writer to delay writing the 12-byte stream header
+// until the first call to Write or Close. This is required because
+// zip.Writer creates the compressor before writing the entry's local file header.
+// Without this delay, the XZ stream header precedes the zip local header,
+// corrupting the archive.
+type delayedXZWriter struct {
+	w       io.Writer
+	xw      *xz.Writer
+	header  bytes.Buffer
+	started bool
+}
+
+type xzInterceptor struct {
+	d *delayedXZWriter
+}
+
+func (xi *xzInterceptor) Write(p []byte) (int, error) {
+	if !xi.d.started {
+		return xi.d.header.Write(p)
+	}
+	return xi.d.w.Write(p)
+}
+
+func newDelayedXZWriter(w io.Writer) (io.WriteCloser, error) {
+	d := &delayedXZWriter{w: w}
+	xw, err := xz.NewWriter(&xzInterceptor{d: d})
+	if err != nil {
+		return nil, err
+	}
+	d.xw = xw
+	return d, nil
+}
+
+func (d *delayedXZWriter) Write(p []byte) (int, error) {
+	if !d.started {
+		d.started = true
+		if d.header.Len() > 0 {
+			if _, err := d.w.Write(d.header.Bytes()); err != nil {
+				return 0, err
+			}
+			d.header.Reset()
+		}
+	}
+	return d.xw.Write(p)
+}
+
+func (d *delayedXZWriter) Close() error {
+	if !d.started {
+		d.started = true
+		if d.header.Len() > 0 {
+			if _, err := d.w.Write(d.header.Bytes()); err != nil {
+				return err
+			}
+			d.header.Reset()
+		}
+	}
+	return d.xw.Close()
+}
+
