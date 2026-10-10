@@ -1,7 +1,9 @@
 package archives
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -12,6 +14,147 @@ import (
 	"testing"
 	"time"
 )
+
+func TestCompressedArchiveCloseError(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		name := "Archive"
+		if async {
+			name = "ArchiveAsync"
+		}
+		t.Run(name, func(t *testing.T) {
+			writeErr := errors.New("output full")
+			output := &compressedArchiveOutput{remaining: 10, err: writeErr}
+			format := CompressedArchive{Compression: Gz{}, Archival: Tar{}}
+			err := createCompressedArchive(format, output, async)
+			if !errors.Is(err, writeErr) {
+				t.Fatalf("expected output error, got %v", err)
+			}
+			if output.closed {
+				t.Fatal("closed the caller's output")
+			}
+		})
+	}
+}
+
+func TestCompressedArchiveCloseRoundTrip(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		name := "Archive"
+		if async {
+			name = "ArchiveAsync"
+		}
+		t.Run(name, func(t *testing.T) {
+			output := &compressedArchiveOutput{remaining: 1024}
+			format := CompressedArchive{Compression: Gz{}, Archival: Tar{}}
+			checkErr(t, createCompressedArchive(format, output, async), "creating archive")
+			reader, err := gzip.NewReader(bytes.NewReader(output.Bytes()))
+			checkErr(t, err, "opening compressed archive")
+			defer reader.Close()
+			data, err := io.ReadAll(reader)
+			checkErr(t, err, "reading compressed archive")
+			_, err = tar.NewReader(bytes.NewReader(data)).Next()
+			if err != io.EOF {
+				t.Fatalf("expected empty tar archive, got %v", err)
+			}
+			if len(data) != 1024 {
+				t.Fatalf("expected two tar end blocks, got %d bytes", len(data))
+			}
+			if output.closed {
+				t.Fatal("closed the caller's output")
+			}
+		})
+	}
+}
+
+func TestCompressedArchivePreservesArchiveError(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		name := "Archive"
+		if async {
+			name = "ArchiveAsync"
+		}
+		t.Run(name, func(t *testing.T) {
+			archiveErr := errors.New("archive creation failed")
+			closeErr := errors.New("compression close failed")
+			writer := &compressedArchiveWriter{err: closeErr}
+			format := CompressedArchive{
+				Compression: compressedArchiveCompression{writer: writer},
+				Archival:    compressedArchiveFailure{err: archiveErr},
+			}
+			if err := createCompressedArchive(format, io.Discard, async); err != archiveErr {
+				t.Fatalf("expected original archive error, got %v", err)
+			}
+			if writer.closes != 1 {
+				t.Fatalf("expected one compression close, got %d", writer.closes)
+			}
+		})
+	}
+}
+
+func createCompressedArchive(format CompressedArchive, output io.Writer, async bool) error {
+	if !async {
+		return format.Archive(context.Background(), output, nil)
+	}
+	jobs := make(chan ArchiveAsyncJob)
+	close(jobs)
+	return format.ArchiveAsync(context.Background(), output, jobs)
+}
+
+type compressedArchiveOutput struct {
+	bytes.Buffer
+	remaining int
+	err       error
+	closed    bool
+}
+
+func (w *compressedArchiveOutput) Write(p []byte) (int, error) {
+	if len(p) > w.remaining {
+		n, _ := w.Buffer.Write(p[:w.remaining])
+		w.remaining = 0
+		return n, w.err
+	}
+	w.remaining -= len(p)
+	return w.Buffer.Write(p)
+}
+
+func (w *compressedArchiveOutput) Close() error {
+	w.closed = true
+	return nil
+}
+
+type compressedArchiveCompression struct {
+	Gz
+	writer *compressedArchiveWriter
+}
+
+func (c compressedArchiveCompression) OpenWriter(io.Writer) (io.WriteCloser, error) {
+	return c.writer, nil
+}
+
+type compressedArchiveWriter struct {
+	err    error
+	closes int
+}
+
+func (w *compressedArchiveWriter) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (w *compressedArchiveWriter) Close() error {
+	w.closes++
+	return w.err
+}
+
+type compressedArchiveFailure struct {
+	Tar
+	err error
+}
+
+func (a compressedArchiveFailure) Archive(context.Context, io.Writer, []FileInfo) error {
+	return a.err
+}
+
+func (a compressedArchiveFailure) ArchiveAsync(context.Context, io.Writer, <-chan ArchiveAsyncJob) error {
+	return a.err
+}
 
 func TestRewindReader(t *testing.T) {
 	data := "the header\nthe body\n"

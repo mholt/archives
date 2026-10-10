@@ -244,23 +244,27 @@ func (ca CompressedArchive) Match(ctx context.Context, filename string, stream i
 }
 
 // Archive writes an archive to the output stream while compressing the result.
-func (ca CompressedArchive) Archive(ctx context.Context, output io.Writer, files []FileInfo) error {
+func (ca CompressedArchive) Archive(ctx context.Context, output io.Writer, files []FileInfo) (err error) {
 	if ca.Archival == nil {
 		return fmt.Errorf("no archival format")
 	}
 	if ca.Compression != nil {
-		wc, err := ca.Compression.OpenWriter(output)
-		if err != nil {
-			return err
+		wc, openErr := ca.Compression.OpenWriter(output)
+		if openErr != nil {
+			return openErr
 		}
-		defer wc.Close()
+		defer func() {
+			if closeErr := wc.Close(); err == nil {
+				err = closeErr
+			}
+		}()
 		output = wc
 	}
 	return ca.Archival.Archive(ctx, output, files)
 }
 
 // ArchiveAsync adds files to the output archive while compressing the result asynchronously.
-func (ca CompressedArchive) ArchiveAsync(ctx context.Context, output io.Writer, jobs <-chan ArchiveAsyncJob) error {
+func (ca CompressedArchive) ArchiveAsync(ctx context.Context, output io.Writer, jobs <-chan ArchiveAsyncJob) (err error) {
 	if ca.Archival == nil {
 		return fmt.Errorf("no archival format")
 	}
@@ -269,11 +273,15 @@ func (ca CompressedArchive) ArchiveAsync(ctx context.Context, output io.Writer, 
 		return fmt.Errorf("%T archive does not support async writing", ca.Archival)
 	}
 	if ca.Compression != nil {
-		wc, err := ca.Compression.OpenWriter(output)
-		if err != nil {
-			return err
+		wc, openErr := ca.Compression.OpenWriter(output)
+		if openErr != nil {
+			return openErr
 		}
-		defer wc.Close()
+		defer func() {
+			if closeErr := wc.Close(); err == nil {
+				err = closeErr
+			}
+		}()
 		output = wc
 	}
 	return do.ArchiveAsync(ctx, output, jobs)
