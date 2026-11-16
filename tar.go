@@ -257,7 +257,9 @@ func (t Tar) Extract(ctx context.Context, sourceArchive io.Reader, handleFile Fi
 			break
 		}
 		if err != nil {
-			if t.ContinueOnError && ctx.Err() == nil {
+			// ErrInsecurePath can be skipped, but other errors leave the tar
+			// reader in a failed state and cannot be recovered from by retrying.
+			if t.ContinueOnError && errors.Is(err, tar.ErrInsecurePath) && ctx.Err() == nil {
 				log.Printf("[ERROR] Advancing to next file in tar archive: %v", err)
 				continue
 			}
