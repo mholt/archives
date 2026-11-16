@@ -215,7 +215,7 @@ func (t Tar) Insert(ctx context.Context, into io.ReadWriteSeeker, files []FileIn
 	// we can now compute the precise location to write the new file to (I think)
 	const blockSize = 512 // (as of Go 1.17, this is also a hard-coded const in the archive/tar package)
 	newOffset := lastStreamPos + lastFileSize
-	newOffset += blockSize - (newOffset % blockSize) // shift to next-nearest block boundary
+	newOffset += (blockSize - (newOffset % blockSize)) % blockSize // round up to a block boundary
 	_, err := into.Seek(newOffset, io.SeekStart)
 	if err != nil {
 		return err
