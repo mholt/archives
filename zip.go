@@ -105,9 +105,13 @@ func (z Zip) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	return mr, nil
 }
 
-func (z Zip) Archive(ctx context.Context, output io.Writer, files []FileInfo) error {
+func (z Zip) Archive(ctx context.Context, output io.Writer, files []FileInfo) (err error) {
 	zw := zip.NewWriter(output)
-	defer zw.Close()
+	defer func() {
+		if closeErr := zw.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	for i, file := range files {
 		if err := z.archiveOneFile(ctx, zw, i, file); err != nil {
@@ -118,9 +122,13 @@ func (z Zip) Archive(ctx context.Context, output io.Writer, files []FileInfo) er
 	return nil
 }
 
-func (z Zip) ArchiveAsync(ctx context.Context, output io.Writer, jobs <-chan ArchiveAsyncJob) error {
+func (z Zip) ArchiveAsync(ctx context.Context, output io.Writer, jobs <-chan ArchiveAsyncJob) (err error) {
 	zw := zip.NewWriter(output)
-	defer zw.Close()
+	defer func() {
+		if closeErr := zw.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	var i int
 	for job := range jobs {
@@ -311,13 +319,17 @@ func (z Zip) getLinkTarget(f *zip.File) (string, error) {
 
 // Insert appends the listed files into the provided Zip archive stream.
 // If the filename already exists in the archive, it will be replaced.
-func (z Zip) Insert(ctx context.Context, into io.ReadWriteSeeker, files []FileInfo) error {
+func (z Zip) Insert(ctx context.Context, into io.ReadWriteSeeker, files []FileInfo) (err error) {
 	// following very simple example at https://github.com/STARRY-S/zip?tab=readme-ov-file#usage
 	zu, err := szip.NewUpdater(into)
 	if err != nil {
 		return err
 	}
-	defer zu.Close()
+	defer func() {
+		if closeErr := zu.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	for idx, file := range files {
 		if err := ctx.Err(); err != nil {

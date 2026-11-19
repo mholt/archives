@@ -72,9 +72,13 @@ func (t Tar) Match(_ context.Context, filename string, stream io.Reader) (MatchR
 	return mr, nil
 }
 
-func (t Tar) Archive(ctx context.Context, output io.Writer, files []FileInfo) error {
+func (t Tar) Archive(ctx context.Context, output io.Writer, files []FileInfo) (err error) {
 	tw := tar.NewWriter(output)
-	defer tw.Close()
+	defer func() {
+		if closeErr := tw.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	for _, file := range files {
 		if err := t.writeFileToArchive(ctx, tw, file); err != nil {
@@ -89,9 +93,13 @@ func (t Tar) Archive(ctx context.Context, output io.Writer, files []FileInfo) er
 	return nil
 }
 
-func (t Tar) ArchiveAsync(ctx context.Context, output io.Writer, jobs <-chan ArchiveAsyncJob) error {
+func (t Tar) ArchiveAsync(ctx context.Context, output io.Writer, jobs <-chan ArchiveAsyncJob) (err error) {
 	tw := tar.NewWriter(output)
-	defer tw.Close()
+	defer func() {
+		if closeErr := tw.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	for job := range jobs {
 		job.Result <- t.writeFileToArchive(ctx, tw, job.File)
@@ -171,7 +179,7 @@ func (t Tar) writeFileToArchive(ctx context.Context, tw *tar.Writer, file FileIn
 	return nil
 }
 
-func (t Tar) Insert(ctx context.Context, into io.ReadWriteSeeker, files []FileInfo) error {
+func (t Tar) Insert(ctx context.Context, into io.ReadWriteSeeker, files []FileInfo) (err error) {
 	// Tar files may end with some, none, or a lot of zero-byte padding. The spec says
 	// it should end with two 512-byte trailer records consisting solely of null/0
 	// bytes: https://www.gnu.org/software/tar/manual/html_node/Standard.html. However,
@@ -216,13 +224,17 @@ func (t Tar) Insert(ctx context.Context, into io.ReadWriteSeeker, files []FileIn
 	const blockSize = 512 // (as of Go 1.17, this is also a hard-coded const in the archive/tar package)
 	newOffset := lastStreamPos + lastFileSize
 	newOffset += blockSize - (newOffset % blockSize) // shift to next-nearest block boundary
-	_, err := into.Seek(newOffset, io.SeekStart)
+	_, err = into.Seek(newOffset, io.SeekStart)
 	if err != nil {
 		return err
 	}
 
 	tw := tar.NewWriter(into)
-	defer tw.Close()
+	defer func() {
+		if closeErr := tw.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 
 	for i, file := range files {
 		if err := ctx.Err(); err != nil {
