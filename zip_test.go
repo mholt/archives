@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -279,5 +280,89 @@ func verifyIsDirectory(t *testing.T, baseDir, relativePath string) {
 	}
 	if !stat.IsDir() {
 		t.Errorf("expected %s to be a directory, got mode %s", relativePath, stat.Mode())
+	}
+}
+
+func statOrFatal(t *testing.T, path string) fs.FileInfo {
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("failed to stat %s: %v", path, err)
+	}
+	return info
+}
+
+// TestZip_InsertContinuesAfterDirectory verifies that Zip.Insert keeps processing the
+// remaining files after it appends a directory entry.
+func TestZip_InsertContinuesAfterDirectory(t *testing.T) {
+	ctx := context.Background()
+	z := archives.Zip{}
+
+	tempDir := t.TempDir()
+	file1Path := filepath.Join(tempDir, "file1.txt")
+	file2Path := filepath.Join(tempDir, "file2.txt")
+	subDir := filepath.Join(tempDir, "subdir")
+	createFile(t, file1Path, "content of file 1")
+	createFile(t, file2Path, "content of file 2")
+	createDir(t, subDir)
+
+	// start with an archive containing one regular file
+	archivePath := filepath.Join(tempDir, "insert_dir.zip")
+	start := archives.FileInfo{
+		FileInfo:      statOrFatal(t, file1Path),
+		NameInArchive: "start.txt",
+		Open: func() (fs.File, error) {
+			return os.Open(file1Path)
+		},
+	}
+	af, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatalf("failed to create archive: %v", err)
+	}
+	if err := z.Archive(ctx, af, []archives.FileInfo{start}); err != nil {
+		t.Fatalf("failed to create base archive: %v", err)
+	}
+	if err := af.Close(); err != nil {
+		t.Fatalf("failed to close base archive: %v", err)
+	}
+
+	// insert a directory followed by a regular file
+	entries := []archives.FileInfo{
+		{FileInfo: statOrFatal(t, subDir), NameInArchive: "subdir"},
+		{
+			FileInfo:      statOrFatal(t, file2Path),
+			NameInArchive: "after.txt",
+			Open: func() (fs.File, error) {
+				return os.Open(file2Path)
+			},
+		},
+	}
+
+	f, err := os.OpenFile(archivePath, os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to open archive for insert: %v", err)
+	}
+	if err := z.Insert(ctx, f, entries); err != nil {
+		t.Fatalf("failed to insert: %v", err)
+	}
+	f.Close()
+
+	// read the archive back and list its entries
+	f, err = os.Open(archivePath)
+	if err != nil {
+		t.Fatalf("failed to reopen archive: %v", err)
+	}
+	defer f.Close()
+	var names []string
+	err = z.Extract(ctx, f, func(ctx context.Context, fi archives.FileInfo) error {
+		names = append(names, fi.NameInArchive)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to read archive: %v", err)
+	}
+
+	want := []string{"start.txt", "subdir/", "after.txt"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("entries after insert: got %v, want %v", names, want)
 	}
 }
