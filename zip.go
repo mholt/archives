@@ -356,7 +356,7 @@ func (z Zip) Insert(ctx context.Context, into io.ReadWriteSeeker, files []FileIn
 
 		// directories have no file body
 		if file.IsDir() {
-			return nil
+			continue
 		}
 		if err := openAndCopyFile(file, w); err != nil {
 			if z.ContinueOnError && ctx.Err() == nil {
